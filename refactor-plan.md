@@ -2,7 +2,7 @@
 
 This repository is Setauket, the memory half. See [kplawver/clothesline](https://github.com/kplawver/clothesline) for the messaging half.
 
-Clothesline was really two separate things: a context store and a messaging system. Those things didn't go together, and people who want one might not want the other. They are now two projects, both at **0.7.0**.
+Clothesline was really two separate things: a context store and a messaging system. Those things didn't go together, and people who want one might not want the other. They are now two projects, released as Clothesline v0.7.0 and Setauket v0.7.1.
 
 | | Repository | Port | Holds |
 |---|---|---|---|

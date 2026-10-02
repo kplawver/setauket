@@ -1,6 +1,6 @@
 {
   "name": "setauket-omp",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Opt-in Setauket turn capture for Oh My Pi",
   "pi": {

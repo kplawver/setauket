@@ -4,7 +4,7 @@ Local, cross-harness memory for coding agents. A single ASGI process serves a St
 
 **Setauket is a context store only.** Durable messaging between agents is a separate project, [Clothesline](https://github.com/kplawver/clothesline), on port 19004. You can install either service without the other.
 
-**Status: 0.7.0.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
+**Status: 0.7.1.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
 
 ## Install with Homebrew
 
@@ -148,6 +148,12 @@ Both stores must be importable, so install both packages first: `uv pip install 
 The script copies session history here and conversations and messages to Clothesline, keeps harness, agent, and project IDs identical in both so an agent keeps its identity, and leaves already-embedded vectors intact so nothing needs re-embedding. It refuses to overwrite existing outputs, refuses a source that is not schema v5, and refuses to split if the legacy database was indexed with a different embedding model than Setauket pins. It then verifies row counts, `integrity_check`, and `foreign_key_check` on both sides and prints a reconciliation table.
 
 Setauket's schema restarts at version 1. There are no in-place migrations from schema v5, because after the split no legacy schema remains.
+
+## Release notes for 0.7.1
+
+Makes the lockfile installable on Intel Macs. onnxruntime, pulled in by fastembed, has published no macOS x86_64 wheel since 1.23.2, so `brew install setauket` could not build an environment there. The lockfile now resolves against macOS x86_64 as well, pinning onnxruntime 1.23.2 for that platform only and leaving Apple Silicon, Linux, and Windows on the current release. `requires-python` is capped below 3.14 because from 3.14 on fastembed requires onnxruntime>=1.24.2, which has no x86_64 macOS wheel at any version. No behavior change on existing Apple Silicon installs.
+
+CI now pins uv's managed CPython build. The runner's system Python is compiled without SQLite extension support, so sqlite-vec could not load there.
 
 ## Release notes for 0.7.0
 
