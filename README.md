@@ -6,6 +6,10 @@ Local, cross-harness memory for coding agents. A single ASGI process serves a St
 
 **Status: 0.7.1.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
 
+## Why "Setauket"?
+
+Naming things is hard. Starting with my other project, [Tallmadge](https://tallmadge.dev), I picked the Culper Ring, George Washington's spy ring, lead by Benjamin Talmadge.  Their headquarters was in Setauket, New York, hence the name!  The team worked in codes and ciphers, keeping meticulous records about British activity and plans, and I figured it was probably kept at their headquarters at least _sometimes_.
+
 ## Install with Homebrew
 
 ```sh
