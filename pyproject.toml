@@ -7,7 +7,9 @@ name = "setauket"
 version = "0.7.0"
 description = "Local cross-harness context storage for coding agents"
 license = "MIT"
-requires-python = ">=3.12"
+# Capped below 3.14: from 3.14 on, fastembed demands onnxruntime>=1.24.2, which has no
+# macOS x86_64 wheel at any version. The Homebrew formula pins python@3.12 regardless.
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "mcp>=2.2,<3",
   "starlette>=0.46,<2",
@@ -27,6 +29,12 @@ setauket = "setauket.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/setauket"]
+
+[tool.uv]
+# onnxruntime, pulled in by fastembed, has published no macOS x86_64 wheel since
+# 1.23.2. Resolving against this environment keeps an installable version pinned for
+# every platform, so the lockfile is usable on Intel Macs.
+required-environments = ["sys_platform == 'darwin' and platform_machine == 'x86_64'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

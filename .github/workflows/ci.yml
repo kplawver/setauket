@@ -22,7 +22,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          # Must be the managed "cpython-" build, not the runner's system Python: this
+          # project loads sqlite-vec through sqlite3.enable_load_extension, which the
+          # system SQLite on macOS runners is compiled without.
+          python-version: "cpython-3.12"
+          cache-python: "true"
+      - name: Require SQLite extension loading
+        run: |
+          uv run --frozen python - <<'PY'
+          import platform, sqlite3, sys
+          print(f"{sys.version.split()[0]} {platform.machine()} "
+                f"sqlite {sqlite3.sqlite_version}")
+          if not hasattr(sqlite3.connect(":memory:"), "enable_load_extension"):
+              raise SystemExit("This interpreter cannot load SQLite extensions; "
+                               "sqlite-vec is required for search.")
+          PY
       - run: uv sync --frozen --extra dev
       - name: Install Clothesline so the v5 split regression test runs
         run: uv pip install --python .venv/bin/python "clothesline @ git+https://github.com/kplawver/clothesline.git"
