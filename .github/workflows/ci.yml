@@ -66,10 +66,14 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           claude plugin validate . --strict
           claude plugin validate plugins/claude-code --strict
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
       - name: Audit the generic .agents layout with Tallmadge
         run: |
           git clone --depth 1 https://github.com/kplawver/tallmadge.git /tmp/tallmadge
-          cd /tmp/tallmadge && bundle install --quiet
+          cd /tmp/tallmadge
+          bundle install --quiet
           bin/clpr repo check "$GITHUB_WORKSPACE"
       - name: Syntax-check the OMP TypeScript extension
         uses: oven-sh/setup-bun@v2
