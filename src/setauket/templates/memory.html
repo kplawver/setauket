@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block body %}<h1>Memory revisions</h1>{% for item in history %}<article class="card"><small>{{ item.kind }} · {{ item.created_at|date }} · {{ 'Superseded' if item.superseded_by else 'Current' }}</small><p class="content">{{ item.content }}</p><small>Agent {{ item.agent_id }}</small></article>{% endfor %}{% endblock %}

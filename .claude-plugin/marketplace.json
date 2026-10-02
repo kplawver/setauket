@@ -1,0 +1,14 @@
+{
+  "name": "setauket",
+  "description": "Local cross-harness context storage integration for coding agents",
+  "owner": {
+    "name": "Kevin Lawver"
+  },
+  "plugins": [
+    {
+      "name": "setauket",
+      "source": "./plugins/claude-code",
+      "description": "Claude Code MCP tools, memory skill, and opt-in turn capture"
+    }
+  ]
+}

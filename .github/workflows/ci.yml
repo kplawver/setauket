@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          # Best-effort x86_64 coverage until the formula is validated on real Intel hardware.
+          - os: macos-15-intel
+            experimental: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental == true }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - name: Install Clothesline so the v5 split regression test runs
+        run: uv pip install --python .venv/bin/python "clothesline @ git+https://github.com/kplawver/clothesline.git"
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/
+          retention-days: 7
+
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate Claude Code plugin and marketplace manifests
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate . --strict
+          claude plugin validate plugins/claude-code --strict
+      - name: Syntax-check the OMP TypeScript extension
+        uses: oven-sh/setup-bun@v2
+      - run: bun build integrations/omp/extensions/setauket.ts --target=bun --outfile=/tmp/setauket-omp-check.js

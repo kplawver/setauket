@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block body %}<h1>Session</h1><p>{{ session.project_key or 'No project' }} · {{ session.started_at|date }} · {{ 'Archived' if session.archived_at else 'Hot' }}</p>
+{% if session.summary %}<h2>Generated summary</h2><article class="card"><small>{{ session.summary.model }} · Raw turns no longer available</small><p class="content">{{ session.summary.content }}</p></article>{% endif %}
+{% for turn in session.turns %}<article class="card"><small>{{ turn.role }} · {{ turn.agent_id }} · {{ turn.created_at|date }}</small><p class="content">{{ turn.content }}</p></article>{% else %}{% if not session.summary %}<p>No turns submitted.</p>{% endif %}{% endfor %}{% endblock %}
