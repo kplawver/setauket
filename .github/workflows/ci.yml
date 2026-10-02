@@ -18,13 +18,18 @@ jobs:
             experimental: true
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental == true }}
+    env:
+      # Not a uv.toml setting: the Homebrew formula passes an explicit --python to
+      # `uv sync`, which only-managed would reject. In CI we want uv's standalone
+      # build, because this project loads sqlite-vec through
+      # sqlite3.enable_load_extension and the runner's system SQLite on macOS is
+      # compiled without extension support. A bare "cpython-3.12" request is not
+      # enough on its own: uv still prefers a discovered system interpreter.
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          # Must be the managed "cpython-" build, not the runner's system Python: this
-          # project loads sqlite-vec through sqlite3.enable_load_extension, which the
-          # system SQLite on macOS runners is compiled without.
           python-version: "cpython-3.12"
           cache-python: "true"
       - name: Require SQLite extension loading
