@@ -96,9 +96,26 @@ Only visible user and assistant text is copied. Structured thinking/reasoning, s
 
 Original harness files/databases are never modified. Historical imports may be archived at the next daily sweep based on their original timestamps. There is no background scanning of saved session files.
 
-## Claude Code plugin: opt-in live capture
+## Installing the skills and MCP server
 
-Install Setauket with Homebrew and start its service first. Then install the Setauket plugin, which bundles the MCP connection, a memory skill (`/setauket:memory`), and hooks for `UserPromptSubmit` and `Stop`:
+Both packaging paths read the same skill text. Pick whichever fits your harness.
+
+### Generic `.agents` standard (Tallmadge, most harnesses)
+
+[Setauket](https://github.com/kplawver/tallmadge) (`clpr`) resolves plugins from the same `.claude-plugin/marketplace.json` this repo publishes, so one catalog serves both systems:
+
+```sh
+clpr marketplace add kplawver/setauket
+clpr activate setauket@setauket
+```
+
+That symlinks the `setauket-memory` skill and the MCP server into `~/.agents/` and composes the plugin's `agents.md` fragment into `~/.agents/agents.md`, so every harness bridged by `clpr` gets the memory guidance. The OMP skill under `integrations/omp/skills/` points at the same file, so all three stay in step.
+
+The repository is in the canonical layout — `AGENTS.md` at the root, skills bridged through `.agents/skills/`, and `CLAUDE.md` plus `.claude/skills` as committable relative symlinks — so a teammate who clones it inherits the standards with nothing to install. `clpr repo check` audits this and runs in CI.
+
+### Claude Code plugin: opt-in live capture
+
+Install Setauket with Homebrew and start its service first. Then install the Setauket plugin, which bundles the MCP connection, the `setauket-memory` skill, and hooks for `UserPromptSubmit` and `Stop`:
 
 ```sh
 claude plugin marketplace add kplawver/setauket

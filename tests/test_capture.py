@@ -230,12 +230,36 @@ def test_plugin_files_are_valid_json():
     mcp = json.loads((plugin / ".mcp.json").read_text())
     hooks = json.loads((plugin / "hooks/hooks.json").read_text())
     assert manifest["name"] == marketplace["plugins"][0]["name"] == "setauket"
+    assert marketplace["owner"]["name"] and isinstance(marketplace["plugins"], list)
+    assert marketplace["plugins"][0]["source"] == "./plugins/claude-code"
     assert mcp["mcpServers"]["setauket"]["url"] == "http://127.0.0.1:19005/mcp"
     assert set(hooks["hooks"]) == {"UserPromptSubmit", "Stop"}
     assert {hook["command"] for group in hooks["hooks"].values() for hook in group[0]["hooks"]} == {"setauket"}
-    assert (plugin / "skills/memory/SKILL.md").exists()
+    assert (plugin / "skills/setauket-memory/SKILL.md").exists()
     omp = root / "integrations/omp"
     package = json.loads((omp / "package.json").read_text())
     assert package["pi"]["extensions"] == ["./extensions/setauket.ts"]
     assert (omp / "extensions/setauket.ts").exists()
     assert (omp / "skills/setauket-memory/SKILL.md").exists()
+
+
+def test_agents_standard_layout_serves_one_copy_of_the_skill():
+    """`.agents`, Claude Code, and OMP must not drift: all three resolve to one file."""
+    root = Path(__file__).resolve().parents[1]
+    skill = root / "plugins/claude-code/skills/setauket-memory/SKILL.md"
+    assert skill.is_file() and not skill.is_symlink()  # the plugin holds the real file
+    text = skill.read_bytes()
+    frontmatter = skill.read_text().split("---")[1]
+    assert "name: setauket-memory" in frontmatter
+    assert "description:" in frontmatter, "most harnesses require description frontmatter"
+
+    for relative in (".agents/skills/setauket-memory", "integrations/omp/skills/setauket-memory"):
+        linked = root / relative
+        assert linked.is_symlink(), f"{relative} must bridge to the plugin, not hold a copy"
+        assert linked.resolve() == skill.parent.resolve()
+        assert linked.joinpath("SKILL.md").read_bytes() == text
+
+    # The composed instruction fragment Tallmadge merges into ~/.agents/agents.md.
+    fragment = root / "plugins/claude-code/agents.md"
+    assert fragment.is_file() and fragment.read_text().strip()
+    assert (root / "AGENTS.md").is_file(), "canonical repo instructions are required"
