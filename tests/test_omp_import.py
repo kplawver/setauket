@@ -68,13 +68,13 @@ def test_archived_session_continues_in_new_segment(source, tmp_path):
     agent = store.register_agent(harness, "main")
     first = store.import_omp(str(source.resolve()), parse_session(source), harness, agent)
     session_id = first["session_id"]
-    assert store.archive(session_id, store.get_session(session_id)["last_turn_at"], "Earlier work", "fake")
+    assert store.archive(session_id, store.get_session(session_id)["last_turn_at"], ["Earlier work"], "fake")
     assert store.import_omp(str(source.resolve()), parse_session(source), harness, agent)["imported"] == 0
     append(source, entry("message", "new", "last", "user", "After archive"))
     resumed = store.import_omp(str(source.resolve()), parse_session(source), harness, agent)
     assert resumed["segment"] == 1
     assert resumed["session_id"] != session_id
-    assert store.get_session(session_id)["summary"]["content"] == "Earlier work"
+    assert store.get_session(session_id)["summaries"][0]["content"] == "Earlier work"
     assert store.get_session(resumed["session_id"])["turns"][0]["content"] == "After archive"
 
 

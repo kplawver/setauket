@@ -47,7 +47,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
     store = store or Store(config.database)
     models = models or LocalModels(config.model_dir)
     worker = Worker(store, models)
-    server = MCPServer("setauket", version="0.7.1", instructions=(
+    server = MCPServer("setauket", version="0.8.0", instructions=(
         "Shared, local memory. Register a persistent harness installation key and an agent first. "
         "Submit visible session turns explicitly; connecting alone does not capture transcripts. "
         "Search before assuming a previous decision is current."))
@@ -88,7 +88,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
         results = await anyio.to_thread.run_sync(store.search_rows, query, project_key, category, limit, vector)
         return {"results": results, "semantic_available": vector is not None}
 
-    @server.tool(description="Retrieve a session by session_id. Hot sessions have turns; archived sessions contain a lossy generated summary, not the original transcript. Session metadata and dates remain available.")
+    @server.tool(description="Retrieve a session by session_id. Hot sessions have turns; archived sessions contain lossy generated summaries, one per 25-turn segment in order, not the original transcript. Session metadata and dates remain available.")
     async def get_session(session_id: str) -> dict:
         return {"session": await anyio.to_thread.run_sync(store.get_session, session_id)}
 

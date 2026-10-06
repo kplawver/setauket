@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -70,13 +71,27 @@ def test_archive_is_atomic_and_does_not_delete_recent_changes(setup):
     store.add_turn(session, harness, agent, "one", "user", "Original turn")
     old_stamp = store.get_session(session)["last_turn_at"]
     store.add_turn(session, harness, agent, "two", "assistant", "New turn")
-    assert not store.archive(session, old_stamp, "outdated summary", "fake")
+    assert not store.archive(session, old_stamp, ["outdated summary"], "fake")
     assert len(store.get_session(session)["turns"]) == 2
-    assert store.archive(session, store.get_session(session)["last_turn_at"], "Faithful summary", "fake")
-    assert not store.archive(session, old_stamp, "again", "fake")
+    assert store.archive(session, store.get_session(session)["last_turn_at"], ["Faithful summary"], "fake")
+    assert not store.archive(session, old_stamp, ["again"], "fake")
     assert store.get_session(session)["turns"] == []
     assert store.search_rows("Original") == []
     assert store.search_rows("Faithful")[0]["session_id"] == session
+
+
+def test_archive_stores_one_summary_per_segment(setup):
+    store, harness, agent = setup
+    session = store.start_session(harness, agent)
+    for n in range(30):
+        store.add_turn(session, harness, agent, f"t{n}", "user", f"Turn {n}")
+    stamp = store.get_session(session)["last_turn_at"]
+    assert store.archive(session, stamp, ["First segment", "Second segment"], "fake")
+    archived = store.get_session(session)
+    assert [(s["segment"], s["content"]) for s in archived["summaries"]] == [
+        (0, "First segment"), (1, "Second segment")]
+    assert archived["turns"] == []
+    assert store.search_rows("Second segment")[0]["session_id"] == session
 
 
 def test_worker_retries_and_completes_archive(setup):
@@ -89,9 +104,26 @@ def test_worker_retries_and_completes_archive(setup):
     worker.sweep()
     while worker.work_one():
         pass
-    assert store.get_session(session)["summary"]["content"] == "Summary of 1 turns"
+    assert [s["content"] for s in store.get_session(session)["summaries"]] == ["Summary of 1 turns"]
     with store.connect() as db:
         assert db.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_worker_summarizes_each_25_turn_segment(setup):
+    store, harness, agent = setup
+    session = store.start_session(harness, agent)
+    for n in range(30):
+        store.add_turn(session, harness, agent, f"t{n}", "user", f"Turn {n}")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET last_turn_at=last_turn_at-? WHERE id=?", (73 * 3600, session))
+    worker = Worker(store, FakeModels())
+    worker.sweep()
+    while worker.work_one():
+        pass
+    summaries = store.get_session(session)["summaries"]
+    assert [s["content"] for s in summaries] == ["Summary of 25 turns", "Summary of 5 turns"]
+    assert [s["segment"] for s in summaries] == [0, 1]
+    assert store.get_session(session)["turns"] == []
 
 
 def test_worker_failure_keeps_unsummarized_history(setup):
@@ -188,13 +220,43 @@ def test_http_and_mcp_versions(setup, tmp_path):
             {"MCP-Protocol-Version": "2026-07-28"})["result"]["content"][0]["text"] == json.dumps({"harness_id": harness}, indent=2)
 
 
-def test_schema_is_version_one_and_reopens_without_migration(tmp_path):
+def test_schema_is_version_two_and_reopens_without_migration(tmp_path):
     path = tmp_path / "setauket.sqlite3"
     store = Store(path)
     with store.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
     assert Store(path).get_session("unknown") is None
     with store.connect() as db:
         db.execute("PRAGMA user_version=99")
     with pytest.raises(ValueError, match="Unsupported database version"):
         Store(path)
+
+
+def test_version_one_database_migrates_summaries_to_segments(tmp_path):
+    path = tmp_path / "setauket.sqlite3"
+    store = Store(path)
+    harness = store.register_harness("migrate-key", "Zed")
+    agent = store.register_agent(harness, "main")
+    session = store.start_session(harness, agent)
+    store.add_turn(session, harness, agent, "one", "user", "Original turn")
+    assert store.archive(session, store.get_session(session)["last_turn_at"], ["Faithful summary"], "fake")
+    raw = sqlite3.connect(path)
+    try:
+        # Rewind the database to the schema-v1 summaries shape and version.
+        raw.execute("ALTER TABLE summaries RENAME TO segmented")
+        raw.execute("CREATE TABLE summaries (id TEXT PRIMARY KEY, "
+                    "session_id TEXT UNIQUE NOT NULL REFERENCES sessions(id), "
+                    "content TEXT NOT NULL, model TEXT NOT NULL, created_at REAL NOT NULL)")
+        raw.execute("INSERT INTO summaries SELECT id,session_id,content,model,created_at FROM segmented")
+        raw.execute("DROP TABLE segmented")
+        raw.execute("PRAGMA user_version=1")
+        raw.commit()
+    finally:
+        raw.close()
+    migrated = Store(path)
+    with migrated.connect() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    summaries = migrated.get_session(session)["summaries"]
+    assert [(s["segment"], s["content"]) for s in summaries] == [(0, "Faithful summary")]
+    assert migrated.search_rows("Faithful")[0]["session_id"] == session

@@ -75,7 +75,7 @@ def test_backup_and_restore_roundtrip(seeded, tmp_path):
     check = sqlite3.connect(backup)
     try:
         assert check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         check.close()
 
@@ -88,7 +88,7 @@ def test_backup_and_restore_roundtrip(seeded, tmp_path):
     restored = Store(restored_db)
     with restored.connect() as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
     # Attribution and history survived the round trip.
     session = restored.get_session(ids["session"])

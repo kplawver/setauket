@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS memories (
   harness_id TEXT NOT NULL REFERENCES harnesses(id), agent_id TEXT NOT NULL REFERENCES agents(id),
   supersedes_id TEXT REFERENCES memories(id), superseded_by TEXT REFERENCES memories(id), created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS summaries (
+  id TEXT PRIMARY KEY, session_id TEXT UNIQUE NOT NULL REFERENCES sessions(id),
+  content TEXT NOT NULL, model TEXT NOT NULL, created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY, category TEXT NOT NULL, source_id TEXT NOT NULL, content TEXT NOT NULL,
   created_at REAL NOT NULL, project_id TEXT REFERENCES projects(id), harness_id TEXT NOT NULL,
@@ -114,6 +118,8 @@ def legacy(tmp_path):
     db.execute("INSERT INTO agents VALUES ('a2','h1','zed-sub','a1',1.0)")
     db.execute("INSERT INTO projects VALUES ('p1','repo/drill','drill')")
     db.execute("INSERT INTO sessions VALUES ('s1','h1','a1','p1',1.0,2.0,NULL,NULL,NULL)")
+    db.execute("INSERT INTO sessions VALUES ('s2','h1','a1','p1',1.0,2.0,3.0,'sum1',3.0)")
+    db.execute("INSERT INTO summaries VALUES ('sum1','s2','Legacy whole-session summary','old-model',3.0)")
     db.execute("INSERT INTO turns VALUES ('t1','s1','h1','a1','event-1','user',"
                "'The parser drops quoted commas',2.0)")
     db.execute("INSERT INTO memories VALUES ('m1','decision','Prefer table tests',"
@@ -167,9 +173,12 @@ def test_split_preserves_every_row_on_both_sides(legacy, tmp_path):
     assert memory.search_rows("quoted")[0]["session_id"] == "s1"
     # Chunks stayed embedded, so the copied vectors need no re-embedding pass.
     assert memory.search_rows("quoted", vector=VECTOR)[0]["source_id"] == "t1"
+    # A legacy whole-session summary lands as segment 0 of the segmented summaries table.
+    archived = memory.get_session("s2")
+    assert [(s["segment"], s["content"]) for s in archived["summaries"]] == [(0, "Legacy whole-session summary")]
     with memory.connect() as db:
         assert db.execute("SELECT embedded FROM chunks WHERE id=7").fetchone()[0] == 1
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
     bus = ClotheslineStore(clothesline_out)
     with bus.connect() as db:

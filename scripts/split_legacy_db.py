@@ -125,7 +125,6 @@ def split(source: Path, setauket_out: Path, clothesline_out: Path) -> dict:
             integrity = db.execute(f"PRAGMA {schema}.integrity_check").fetchone()[0]
             if integrity != "ok":
                 raise SystemExit(f"Integrity check failed for {schema}: {integrity}")
-            db.execute(f"PRAGMA {schema}.user_version=1")
         db.commit()
     finally:
         db.close()  # Closing the connection releases the attached schemas.

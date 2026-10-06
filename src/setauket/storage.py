@@ -31,8 +31,9 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE INDEX IF NOT EXISTS turns_session ON turns(session_id, created_at);
 CREATE TABLE IF NOT EXISTS summaries (
-  id TEXT PRIMARY KEY, session_id TEXT UNIQUE NOT NULL REFERENCES sessions(id),
-  content TEXT NOT NULL, model TEXT NOT NULL, created_at REAL NOT NULL
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id),
+  segment INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, model TEXT NOT NULL, created_at REAL NOT NULL,
+  UNIQUE(session_id, segment)
 );
 CREATE TABLE IF NOT EXISTS memories (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('decision', 'preference')),
@@ -89,8 +90,10 @@ class Store:
             self.path.chmod(0o600)
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise ValueError("Unsupported database version; upgrade Setauket before opening it")
+            if version == 1:
+                self._rebuild_segmented_summaries(db)
             db.executescript(identity.IDENTITY_SCHEMA)
             db.executescript(MEMORY_SCHEMA)
             db.executescript(IMPORT_SCHEMA)
@@ -105,8 +108,22 @@ class Store:
             revision = db.execute("SELECT value FROM metadata WHERE key='embedding_revision'").fetchone()[0]
             if revision != EMBED_REVISION:
                 raise ValueError("Embedding revision changed; indexes must be rebuilt before continuing")
-            db.execute("PRAGMA user_version=1")
+            db.execute("PRAGMA user_version=2")
         self.path.chmod(0o600)
+
+    @staticmethod
+    def _rebuild_segmented_summaries(db):
+        """Schema v2: a session archives one summary row per 25-turn segment, ordered by `segment`."""
+        if "segment" in {row[1] for row in db.execute("PRAGMA table_info(summaries)")}:
+            return
+        db.execute("ALTER TABLE summaries RENAME TO summaries_v1")
+        db.execute("CREATE TABLE summaries ("
+                   "id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), "
+                   "segment INTEGER NOT NULL DEFAULT 0, content TEXT NOT NULL, model TEXT NOT NULL, "
+                   "created_at REAL NOT NULL, UNIQUE(session_id, segment))")
+        db.execute("INSERT INTO summaries (id,session_id,segment,content,model,created_at) "
+                   "SELECT id,session_id,0,content,model,created_at FROM summaries_v1")
+        db.execute("DROP TABLE summaries_v1")
 
     @contextmanager
     def connect(self):
@@ -227,8 +244,8 @@ class Store:
                 return None
             result = dict(row)
             result["turns"] = [dict(r) for r in db.execute("SELECT * FROM turns WHERE session_id=? ORDER BY created_at,rowid", (session_id,))]
-            summary = db.execute("SELECT * FROM summaries WHERE session_id=?", (session_id,)).fetchone()
-            result["summary"] = dict(summary) if summary else None
+            result["summaries"] = [dict(r) for r in db.execute(
+                "SELECT * FROM summaries WHERE session_id=? ORDER BY segment", (session_id,))]
             return result
 
     def get_memory(self, memory_id: str) -> list[dict]:
@@ -244,19 +261,25 @@ class Store:
                 row = db.execute("SELECT * FROM memories WHERE id=?", (row["superseded_by"],)).fetchone() if row["superseded_by"] else None
             return history
 
-    def archive(self, session_id: str, last_turn_at: float, summary: str, model: str) -> bool:
+    def archive(self, session_id: str, last_turn_at: float, summaries: list[str], model: str) -> bool:
+        """Replace a session's raw turns with ordered per-segment summaries in one transaction."""
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             session = db.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
             if not session or session["archived_at"] is not None or session["last_turn_at"] != last_turn_at:
                 return False
-            summary_id, now = uid(), time.time()
-            db.execute("INSERT INTO summaries VALUES (?,?,?,?,?)", (summary_id, session_id, summary, model, now))
-            self._add_chunks(db, "cold", summary_id, summary, now, session["project_id"], session["harness_id"], session["agent_id"])
+            now = time.time()
+            first_summary_id = None
+            for segment, content in enumerate(summaries):
+                summary_id = uid()
+                first_summary_id = first_summary_id or summary_id
+                db.execute("INSERT INTO summaries (id,session_id,segment,content,model,created_at) VALUES (?,?,?,?,?,?)",
+                           (summary_id, session_id, segment, content, model, now))
+                self._add_chunks(db, "cold", summary_id, content, now, session["project_id"], session["harness_id"], session["agent_id"])
             for row in db.execute("SELECT id FROM turns WHERE session_id=?", (session_id,)).fetchall():
                 self._delete_chunks(db, "hot", row[0])
             db.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
-            db.execute("UPDATE sessions SET summary_id=?, archived_at=? WHERE id=?", (summary_id, now, session_id))
+            db.execute("UPDATE sessions SET summary_id=?, archived_at=? WHERE id=?", (first_summary_id, now, session_id))
             return True
 
     def was_captured_session(self, harness: str, project_key: str, external_session_id: str) -> bool:

@@ -4,7 +4,7 @@ Local, cross-harness memory for coding agents. A single ASGI process serves a St
 
 **Setauket is a context store only.** Durable messaging between agents is a separate project, [Clothesline](https://github.com/kplawver/clothesline), on port 19004. You can install either service without the other.
 
-**Status: 0.7.1.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
+**Status: 0.8.0.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
 
 ## Why "Setauket"?
 
@@ -74,7 +74,7 @@ Neither MCP transport sessions nor model-facing harness names act as authenticat
 
 ## Retention and search
 
-After 72 hours without new turns, a daily sweep schedules an archive job. A generated summary is indexed before raw turns and their search indexes are deleted in one database transaction. Failed summary jobs keep the originals and show errors in the dashboard. Generated summaries are lossy and should not be promoted automatically into preferences. Original turn content and associated source event IDs are no longer available after archival; project, session dates, and attribution remain.
+After 72 hours without new turns, a daily sweep schedules an archive job. The session is compacted in 25-turn segments: one summary per segment is indexed before raw turns and their search indexes are deleted in one database transaction. Bounded segments keep each summarizer call small so long sessions cannot degenerate into echoing or truncating output. Failed summary jobs keep the originals and show errors in the dashboard. Generated summaries are lossy and should not be promoted automatically into preferences. Original turn content and associated source event IDs are no longer available after archival; project, session dates, and attribution remain.
 
 FTS5 handles literal keyword queries; sqlite-vec adds local semantic search when embeddings are installed and processed. The web UI uses keyword search. All content remains on this machine except model downloads from Hugging Face.
 
@@ -170,7 +170,11 @@ Both stores must be importable, so install both packages first: `uv pip install 
 
 The script copies session history here and conversations and messages to Clothesline, keeps harness, agent, and project IDs identical in both so an agent keeps its identity, and leaves already-embedded vectors intact so nothing needs re-embedding. It refuses to overwrite existing outputs, refuses a source that is not schema v5, and refuses to split if the legacy database was indexed with a different embedding model than Setauket pins. It then verifies row counts, `integrity_check`, and `foreign_key_check` on both sides and prints a reconciliation table.
 
-Setauket's schema restarts at version 1. There are no in-place migrations from schema v5, because after the split no legacy schema remains.
+Setauket's schema is at version 2: v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open. There are no migrations from schema v5, because after the split no legacy schema remains.
+
+## Release notes for 0.8.0
+
+Session compaction now summarizes each 25-turn segment of a session separately instead of producing one whole-session summary. Each summarizer call sees a bounded slice of the transcript, which preserves more detail and avoids the degenerate echo-and-truncate behavior the whole-session map/combine passes showed on long or repetitive sessions. The database migrates to schema v2 in place on first open; existing summaries are preserved unchanged as segment 0. Sessions with no submitted turns now archive without a placeholder summary row. The `get_session` tool returns `summaries`, an ordered list, instead of a single `summary`.
 
 ## Release notes for 0.7.1
 

@@ -68,13 +68,13 @@ def test_missing_prompt_id_repeated_prompt_and_archived_segment(tmp_path):
         session_id = db.execute("SELECT id FROM sessions").fetchone()[0]
     assert len(store.get_session(session_id)["turns"]) == 4
     session = store.get_session(session_id)
-    assert store.archive(session_id, session["last_turn_at"], "Earlier answers", "fake")
+    assert store.archive(session_id, session["last_turn_at"], ["Earlier answers"], "fake")
     assert not capture_hook(config, reply)  # No duplicate after the raw turns expire.
     assert capture_hook(config, event("UserPromptSubmit", tmp_path, prompt="New prompt", prompt_id="new-id"))
     with store.connect() as db:
         assert db.execute("SELECT segment FROM capture_sources").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM sessions").fetchone()[0] == 2
-    assert store.get_session(session_id)["summary"]["content"] == "Earlier answers"
+    assert store.get_session(session_id)["summaries"][0]["content"] == "Earlier answers"
 
 
 def test_prompt_id_reuse_with_different_content_rejected(tmp_path):

@@ -11,6 +11,10 @@ from setauket.storage import Store
 
 log = logging.getLogger(__name__)
 
+# Compaction slices a session into 25-turn segments so each summarizer call sees a bounded
+# transcript; whole-session map/combine passes degenerated on long sessions.
+SEGMENT_TURNS = 25
+
 
 class Worker:
     def __init__(self, store: Store, models: LocalModels, interval: float = 10):
@@ -62,8 +66,10 @@ class Worker:
                         pass  # Received a new turn since the job was queued.
                     else:
                         try:
-                            summary = self.models.summarize(session["turns"])
-                            self.store.archive(session["id"], session["last_turn_at"], summary, TEXT_REPO)
+                            turns = session["turns"]
+                            summaries = [self.models.summarize(turns[i:i + SEGMENT_TURNS])
+                                         for i in range(0, len(turns), SEGMENT_TURNS)]
+                            self.store.archive(session["id"], session["last_turn_at"], summaries, TEXT_REPO)
                         finally:
                             self.models.unload_text()
             else:

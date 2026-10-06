@@ -25,7 +25,7 @@ The links run from `.agents/` and `integrations/omp/` into the plugin, not the r
 
 - **Loopback only.** `Config` rejects any host that is not `127.0.0.1`, `::1`, or `localhost`. Keep it that way; the service is unauthenticated.
 - **Capturing is attributed, not authenticated.** Never describe a harness or agent name as proof of identity.
-- **Retention is explicit.** Raw turns live three days past the last turn, then a generated summary replaces them in one transaction. Summaries are lossy and must never be promoted into preferences on their own.
+- **Retention is explicit.** Raw turns live three days past the last turn, then generated summaries — one per 25-turn segment — replace them in one transaction. Summaries are lossy and must never be promoted into preferences on their own.
 - **Captured and imported text is not a secret scanner.** Only visible user and assistant text is stored, and that text can still contain secrets.
 - **A session reference is owned here.** Clothesline stores `conversations.session_id` opaquely and cannot validate it. Do not add validation there, and do not assume Clothesline can see these tables.
 - **Nothing leaves the machine** except model downloads from Hugging Face and whatever the user explicitly imports from their own files.
@@ -35,5 +35,5 @@ The links run from `.agents/` and `integrations/omp/` into the plugin, not the r
 1. `uv run ruff check .`
 2. `uv run pytest -q`
 3. `claude plugin validate . --strict && claude plugin validate plugins/claude-code --strict`
-4. Database schema changes: bump `user_version` and add a migration, since `Store.__init__` gates on it. The schema is at version 1; it restarts at 1 because the v0.7 split left no legacy schema to migrate.
+4. Database schema changes: bump `user_version` and add a migration, since `Store.__init__` gates on it. The schema is at version 2; v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open.
 5. Changing `pyproject.toml` dependencies means `uv lock`, and a lock change means the Homebrew tarball hash changes.
