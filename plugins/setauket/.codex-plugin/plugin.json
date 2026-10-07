@@ -1,0 +1,6 @@
+{
+  "name": "setauket",
+  "version": "0.8.0",
+  "description": "Setauket memory tools and opt-in Codex turn capture",
+  "hooks": "./codex/hooks.json"
+}

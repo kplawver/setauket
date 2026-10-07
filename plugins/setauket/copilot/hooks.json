@@ -1,0 +1,24 @@
+{
+  "userPromptSubmitted": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "setauket capture-copilot --hook",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "agentStop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "setauket capture-copilot --hook",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

@@ -7,8 +7,8 @@
   "plugins": [
     {
       "name": "setauket",
-      "source": "./plugins/claude-code",
-      "description": "Claude Code MCP tools, memory and session skills, and opt-in turn capture",
+      "source": "./plugins/setauket",
+      "description": "Claude Code and Codex MCP tools, memory and session skills, and opt-in turn capture",
       "category": "memory",
       "tags": ["mcp", "memory", "skills", "capture", "local", "semantic-search"]
     }

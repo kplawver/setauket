@@ -8,13 +8,16 @@ import time
 from pathlib import Path
 
 from setauket.config import load
+from setauket.identity import CAPTURE_HARNESSES
+
+CAPTURE_COMMANDS = sorted(f"capture-{harness}" for harness in CAPTURE_HARNESSES)
 
 
 def main():
     parser = argparse.ArgumentParser(prog="setauket")
     parser.add_argument("command", choices=["serve", "setup", "status", "doctor", "backup", "rebuild-index",
                                             "import-omp", "import-pi", "import-claude", "import-codex",
-                                            "import-zed", "import-opencode", "capture-claude", "capture-omp"])
+                                            "import-zed", "import-opencode", *CAPTURE_COMMANDS])
     parser.add_argument("--config", type=Path)
     parser.add_argument("--output", type=Path, help="Backup destination")
     parser.add_argument("--source", type=Path, help="OMP main-session JSONL file to import")
@@ -23,8 +26,8 @@ def main():
     parser.add_argument("--list", action="store_true", help="List available Zed/OpenCode session IDs only")
     parser.add_argument("--project", type=Path, default=Path.cwd(), help="Project directory for capture consent")
     capture_action = parser.add_mutually_exclusive_group()
-    capture_action.add_argument("--enable", action="store_true", help="Allow Claude capture for this project")
-    capture_action.add_argument("--disable", action="store_true", help="Stop Claude capture for this project")
+    capture_action.add_argument("--enable", action="store_true", help="Allow turn capture for this project")
+    capture_action.add_argument("--disable", action="store_true", help="Stop turn capture for this project")
     capture_action.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     config = load(args.config)
@@ -44,7 +47,7 @@ def main():
             with Store(config.database).connect() as db:
                 db.execute("UPDATE jobs SET next_at=?,error=NULL WHERE kind IN ('embed','archive')", (time.time(),))
         print("Local models installed; pending jobs are ready to retry")
-    elif args.command in {"capture-claude", "capture-omp"}:
+    elif args.command.startswith("capture-"):
         from setauket.capture import capture_hook, enabled, set_enabled
 
         harness = args.command.removeprefix("capture-")
