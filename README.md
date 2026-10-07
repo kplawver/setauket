@@ -1,5 +1,7 @@
 # Setauket
 
+**This is still _very_ experimental. I'm still working on the plugin to get harnesses to reliably connect and send turns. The MCP works though!**
+
 Local, cross-harness memory for coding agents. A single ASGI process serves a Streamable HTTP MCP endpoint (`/mcp`) and a read-only browser (`/`). Submitted session turns are searchable for three days after inactivity; then they are summarized and raw turns are removed. Decisions and preferences remain versioned until explicitly superseded.
 
 **Setauket is a context store only.** Durable messaging between agents is a separate project, [Clothesline](https://github.com/kplawver/clothesline), on port 19004. You can install either service without the other.
