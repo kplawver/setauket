@@ -11,6 +11,7 @@ import pytest
 from setauket.capture import capture_hook, set_enabled
 from setauket.cli import main
 from setauket.config import Config
+from setauket.identity import CAPTURE_HARNESSES
 from setauket.storage import Store
 
 
@@ -222,44 +223,193 @@ def test_omp_capture_refuses_manual_import_of_same_source(tmp_path, monkeypatch)
         main()
 
 
+def test_codex_capture_reuses_claude_payload_shape(tmp_path):
+    config = Config(data_dir=tmp_path / "data")
+    user = event("UserPromptSubmit", tmp_path, prompt="Codex prompt")
+    reply = event("Stop", tmp_path, last_assistant_message="Codex reply")
+    assert not capture_hook(config, user, "codex")  # Codex consent is independent of Claude consent.
+    assert not (config.data_dir / "codex-capture.json").exists()
+    assert set_enabled(config, tmp_path, True, "codex")
+    assert capture_hook(config, user, "codex")
+    assert not capture_hook(config, user, "codex")
+    assert capture_hook(config, reply, "codex")
+    store = Store(config.database)
+    with store.connect() as db:
+        assert db.execute("SELECT name FROM harnesses WHERE installation_key='setauket:codex:hook'").fetchone()[0] == "OpenAI Codex"
+        assert db.execute("SELECT external_id FROM agents").fetchone()[0] == "codex-session:claude-session-1"
+        session = db.execute("SELECT id FROM sessions").fetchone()[0]
+    assert [t["content"] for t in store.get_session(session)["turns"]] == ["Codex prompt", "Codex reply"]
+
+
+def test_devin_capture_needs_project_env_and_skips_missing_reply(tmp_path, monkeypatch):
+    config = Config(data_dir=tmp_path / "data")
+    set_enabled(config, tmp_path, True, "devin")
+    payload = {"hook_event_name": "UserPromptSubmit", "session_id": "devin-1", "prompt_id": "p1",
+               "prompt": "Devin prompt"}
+    assert not capture_hook(config, payload, "devin")  # No cwd field and no DEVIN_PROJECT_DIR.
+    monkeypatch.setenv("DEVIN_PROJECT_DIR", str(tmp_path))
+    assert capture_hook(config, payload, "devin")
+    assert not capture_hook(config, payload, "devin")  # Consecutive duplicate collapses.
+    stop = {"hook_event_name": "Stop", "session_id": "devin-1", "stop_hook_active": False}
+    assert not capture_hook(config, stop, "devin")  # Devin publishes no reply text yet; fail closed.
+    with pytest.raises(ValueError, match="Unsupported capture harness"):
+        Store(config.database).capture_turn("bogus", str(tmp_path), "s", None, "user", "x")
+
+
+def test_copilot_capture_tolerates_event_and_field_variants(tmp_path):
+    config = Config(data_dir=tmp_path / "data")
+    set_enabled(config, tmp_path, True, "copilot")
+    assert capture_hook(config, event("userPromptSubmitted", tmp_path, prompt="Copilot prompt"), "copilot")
+    assert capture_hook(config, event("UserPromptSubmit", tmp_path, prompt="Second", prompt_id="p2"), "copilot")
+    stop = event("agentStop", tmp_path, response="Copilot reply", prompt_id="r1")
+    assert capture_hook(config, stop, "copilot")  # Reply arrives under the fallback field.
+    assert not capture_hook(config, event("agentStop", tmp_path, prompt_id="r2"), "copilot")  # No text field.
+
+
+def test_opencode_and_cline_wire_format_is_independently_opted_in(tmp_path):
+    config = Config(data_dir=tmp_path / "data")
+    user = {"hook_event_name": "input", "cwd": str(tmp_path), "session_id": "ext-1", "text": "Visible"}
+    assert not capture_hook(config, user, "opencode")
+    set_enabled(config, tmp_path, True, "opencode")
+    assert not capture_hook(config, user, "cline")  # OpenCode consent is not Cline consent.
+    assert capture_hook(config, user, "opencode")
+    assert not capture_hook(config, user, "opencode")  # Consecutive duplicate collapses.
+    assert capture_hook(config, {**user, "hook_event_name": "agent_end", "text": "Visible reply"}, "opencode")
+    set_enabled(config, tmp_path, True, "cline")
+    assert capture_hook(config, {**user, "session_id": "ext-2"}, "cline")
+    store = Store(config.database)
+    with store.connect() as db:
+        names = dict(db.execute("SELECT installation_key,name FROM harnesses").fetchall())
+    assert names["setauket:opencode:hook"] == "OpenCode"
+    assert names["setauket:cline:hook"] == "Cline"
+
+
+def test_cli_accepts_every_capture_harness_and_fails_open(tmp_path, monkeypatch, capsys):
+    data_dir = tmp_path / "data"
+    for harness in sorted(CAPTURE_HARNESSES - {"claude", "omp"}):
+        monkeypatch.setenv("SETAUKET_DATA_DIR", str(data_dir))
+        monkeypatch.setattr(sys, "argv", ["setauket", f"capture-{harness}", "--project", str(tmp_path), "--enable"])
+        main()
+        assert json.loads(capsys.readouterr().out)["capture_enabled"] is True
+        monkeypatch.setattr(sys, "argv", ["setauket", f"capture-{harness}", "--hook"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO("not JSON (private)"))
+        main()
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert "private" not in output.err
+
+
+def test_opencode_plugin_forwards_visible_text_only(tmp_path):
+    if not shutil.which("node") or int(subprocess.check_output(["node", "-p", "process.versions.node.split('.')[0]"], text=True)) < 22:
+        pytest.skip("Node 22+ required to load the TypeScript plugin")
+    config = Config(data_dir=tmp_path / "data")
+    set_enabled(config, tmp_path, True, "opencode")
+    plugin = Path(__file__).resolve().parents[1] / "integrations/opencode/setauket.ts"
+    script = """
+        const mod = await import(process.argv[1]);
+        const plugin = await mod.SetauketCapture({
+          directory: process.argv[2],
+          client: { session: { messages: async () => ({ data: [
+            { info: { id: 'u1', role: 'user' }, parts: [
+              { type: 'thinking', thinking: 'private reasoning' },
+              { type: 'text', text: 'Visible OpenCode prompt' }] },
+            { info: { id: 'a1', role: 'assistant' }, parts: [
+              { type: 'tool', callID: 't1' },
+              { type: 'text', text: 'Visible OpenCode reply' }] },
+          ] }) } },
+        });
+        await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'oc-1' } } });
+        await plugin.event({ event: { type: 'session.idle', properties: { sessionID: 'oc-1' } } });
+    """
+    env = {**os.environ, "SETAUKET_DATA_DIR": str(config.data_dir),
+           "PATH": f"{Path(sys.executable).parent}:{os.environ.get('PATH', '')}"}
+    subprocess.run(["node", "--input-type=module", "-e", script, plugin.as_uri(), str(tmp_path)],
+                   env=env, capture_output=True, check=True, timeout=15)
+    store = Store(config.database)
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM turns").fetchone()[0] == 2  # Second idle records nothing new.
+    assert not store.search_rows("private")  # thinking and tool parts are never stored.
+
+
+def test_cline_plugin_forwards_visible_text_only(tmp_path):
+    if not shutil.which("node") or int(subprocess.check_output(["node", "-p", "process.versions.node.split('.')[0]"], text=True)) < 22:
+        pytest.skip("Node 22+ required to load the TypeScript plugin")
+    config = Config(data_dir=tmp_path / "data")
+    set_enabled(config, tmp_path, True, "cline")
+    plugin = Path(__file__).resolve().parents[1] / "integrations/cline/setauket.ts"
+    script = """
+        const mod = await import(process.argv[1]);
+        const plugin = mod.default;
+        plugin.setup(undefined, { cwd: process.argv[2], sessionId: 'cline-fixture' });
+        await plugin.hooks.beforeRun({ prompt: 'Visible Cline prompt' });
+        await plugin.hooks.beforeRun({ prompt: 'Visible Cline prompt' });
+        await plugin.hooks.afterRun({ result: { output: 'Visible Cline reply' } });
+        await plugin.hooks.afterRun({ result: { output: 'Visible Cline reply' } });
+    """
+    env = {**os.environ, "SETAUKET_DATA_DIR": str(config.data_dir),
+           "PATH": f"{Path(sys.executable).parent}:{os.environ.get('PATH', '')}"}
+    subprocess.run(["node", "--input-type=module", "-e", script, plugin.as_uri(), str(tmp_path)],
+                   env=env, capture_output=True, check=True, timeout=15)
+    store = Store(config.database)
+    with store.connect() as db:
+        assert [(row[0], row[1]) for row in db.execute("SELECT role,content FROM turns ORDER BY rowid")] == [
+            ("user", "Visible Cline prompt"), ("assistant", "Visible Cline reply")]
+    assert not store.search_rows("private")
+
+
 def test_plugin_files_are_valid_json():
     root = Path(__file__).resolve().parents[1]
-    plugin = root / "plugins/claude-code"
+    plugin = root / "plugins/setauket"
     manifest = json.loads((plugin / ".claude-plugin/plugin.json").read_text())
+    codex_manifest = json.loads((plugin / ".codex-plugin/plugin.json").read_text())
     marketplace = json.loads((root / ".claude-plugin/marketplace.json").read_text())
     mcp = json.loads((plugin / ".mcp.json").read_text())
     hooks = json.loads((plugin / "hooks/hooks.json").read_text())
-    assert manifest["name"] == marketplace["plugins"][0]["name"] == "setauket"
+    assert manifest["name"] == marketplace["plugins"][0]["name"] == codex_manifest["name"] == "setauket"
     assert marketplace["owner"]["name"] and isinstance(marketplace["plugins"], list)
-    assert marketplace["plugins"][0]["source"] == "./plugins/claude-code"
+    assert marketplace["plugins"][0]["source"] == "./plugins/setauket"
     assert mcp["mcpServers"]["setauket"]["url"] == "http://127.0.0.1:19005/mcp"
     assert set(hooks["hooks"]) == {"UserPromptSubmit", "Stop"}
     assert {hook["command"] for group in hooks["hooks"].values() for hook in group[0]["hooks"]} == {"setauket"}
+    assert codex_manifest["hooks"] == "./codex/hooks.json"
+    for harness, path, wrapper in (("codex", "codex/hooks.json", True), ("devin", "devin/hooks.v1.json", False),
+                                   ("copilot", "copilot/hooks.json", False)):
+        document = json.loads((plugin / path).read_text())
+        events = document["hooks"] if wrapper else document
+        commands = {hook["command"] for group in events.values() for hook in group[0]["hooks"]}
+        assert commands == {f"setauket capture-{harness} --hook"}, path
     assert (plugin / "skills/setauket-memory/SKILL.md").exists()
     omp = root / "integrations/omp"
     package = json.loads((omp / "package.json").read_text())
     assert package["pi"]["extensions"] == ["./extensions/setauket.ts"]
     assert (omp / "extensions/setauket.ts").exists()
     assert (omp / "skills/setauket-memory/SKILL.md").exists()
+    assert (root / "integrations/opencode/setauket.ts").is_file()
+    cline = root / "integrations/cline"
+    cline_package = json.loads((cline / "package.json").read_text())
+    assert cline_package["cline"]["plugins"] == [{"paths": ["./setauket.ts"], "capabilities": ["hooks"]}]
+    assert (cline / "setauket.ts").is_file()
+    assert (cline / "skills/setauket-memory/SKILL.md").is_file()
 
 
 def test_agents_standard_layout_serves_one_copy_of_the_skill():
     """`.agents`, Claude Code, and OMP must not drift: all three resolve to one file."""
     root = Path(__file__).resolve().parents[1]
-    skill = root / "plugins/claude-code/skills/setauket-memory/SKILL.md"
+    skill = root / "plugins/setauket/skills/setauket-memory/SKILL.md"
     assert skill.is_file() and not skill.is_symlink()  # the plugin holds the real file
     text = skill.read_bytes()
     frontmatter = skill.read_text().split("---")[1]
     assert "name: setauket-memory" in frontmatter
     assert "description:" in frontmatter, "most harnesses require description frontmatter"
 
-    for relative in (".agents/skills/setauket-memory", "integrations/omp/skills/setauket-memory"):
+    for relative in (".agents/skills/setauket-memory", "integrations/omp/skills/setauket-memory",
+                     "integrations/cline/skills/setauket-memory"):
         linked = root / relative
         assert linked.is_symlink(), f"{relative} must bridge to the plugin, not hold a copy"
         assert linked.resolve() == skill.parent.resolve()
         assert linked.joinpath("SKILL.md").read_bytes() == text
 
     # The composed instruction fragment Tallmadge merges into ~/.agents/agents.md.
-    fragment = root / "plugins/claude-code/agents.md"
+    fragment = root / "plugins/setauket/agents.md"
     assert fragment.is_file() and fragment.read_text().strip()
     assert (root / "AGENTS.md").is_file(), "canonical repo instructions are required"

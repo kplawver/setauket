@@ -16,10 +16,12 @@ Local, cross-harness context storage for coding agents. One ASGI process serves 
 | `src/setauket/cli.py` | `serve`, `setup`, `status`, `doctor`, `backup`, `rebuild-index`, `import-*`, `capture-*`. |
 | `scripts/split_legacy_db.py` | One-shot migration from the old combined Clothesline database. Not on the CLI. |
 | `.agents/skills/` | Generic `.agents` standard. Each entry is a symlink into the plugin's `skills/`. |
-| `plugins/claude-code/` | Claude Code packaging. Holds the real skill files, `.mcp.json`, capture `hooks/`, and an `agents.md` fragment Tallmadge composes into `~/.agents/agents.md`. |
+| `plugins/setauket/` | One bundle for hook-capable harnesses. Holds the Claude Code plugin manifest (`.claude-plugin/`), the Codex plugin manifest (`.codex-plugin/` + `codex/hooks.json`), Devin (`devin/hooks.v1.json`) and Copilot CLI (`copilot/hooks.json`) hook configs, the real skill files, `.mcp.json`, and an `agents.md` fragment Tallmadge composes into `~/.agents/agents.md`. |
 | `integrations/omp/` | Oh My Pi extension and skill. Its `skills/` entry is a symlink into the plugin. |
+| `integrations/opencode/` | OpenCode plugin (`setauket.ts`). Users copy or symlink it into `.opencode/plugins/`. |
+| `integrations/cline/` | Cline plugin package (`setauket.ts` + `package.json`). Its `skills/` entry is a symlink into the plugin. |
 
-The links run from `.agents/` and `integrations/omp/` into the plugin, not the reverse, because `claude plugin validate --strict` treats a symlinked plugin component as a warning it will not follow. One copy of the text serves all three readers.
+The links run from `.agents/` and the integrations into the plugin, not the reverse, because `claude plugin validate --strict` treats a symlinked plugin component as a warning it will not follow. One copy of the text serves all readers.
 
 ## Ground rules
 
@@ -34,6 +36,7 @@ The links run from `.agents/` and `integrations/omp/` into the plugin, not the r
 
 1. `uv run ruff check .`
 2. `uv run pytest -q`
-3. `claude plugin validate . --strict && claude plugin validate plugins/claude-code --strict`
+3. `claude plugin validate . --strict && claude plugin validate plugins/setauket --strict`
 4. Database schema changes: bump `user_version` and add a migration, since `Store.__init__` gates on it. The schema is at version 2; v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open.
 5. Changing `pyproject.toml` dependencies means `uv lock`, and a lock change means the Homebrew tarball hash changes.
+6. Adding a capture harness means all of: `CAPTURE_HARNESSES`/`CAPTURE_HARNESS_NAMES` in `identity.py`, an event row in `_ROLES` in `capture.py`, a `capture-<harness>` command (generated from the registry), a hook file or extension under `plugins/setauket/` or `integrations/`, and tests. Hooks and extensions shell out to the CLI; they never write to the database directly.

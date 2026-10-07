@@ -27,6 +27,21 @@ def uid() -> str:
     return uuid.uuid4().hex
 
 
+# Harnesses with hook-based capture. Each entry needs a per-harness consent file,
+# a capture-<harness> CLI command, event normalization in setauket.capture, and a
+# hook file or extension under plugins/ or integrations/.
+CAPTURE_HARNESSES = frozenset({"claude", "omp", "codex", "devin", "copilot", "opencode", "cline"})
+CAPTURE_HARNESS_NAMES = {
+    "claude": "Claude Code",
+    "omp": "Oh My Pi",
+    "codex": "OpenAI Codex",
+    "devin": "Devin CLI",
+    "copilot": "GitHub Copilot CLI",
+    "opencode": "OpenCode",
+    "cline": "Cline",
+}
+
+
 def register_harness(db, installation_key: str, name: str) -> str:
     if not installation_key.strip() or not name.strip():
         raise ValueError("An installation key and harness name are required")

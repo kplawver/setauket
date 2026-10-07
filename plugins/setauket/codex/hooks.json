@@ -1,0 +1,27 @@
+{
+  "description": "Capture visible Codex prompts and final replies only in explicitly enabled projects",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "setauket capture-codex --hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "setauket capture-codex --hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite_vec
 
 from setauket import identity
-from setauket.identity import uid
+from setauket.identity import CAPTURE_HARNESS_NAMES, CAPTURE_HARNESSES, uid
 from setauket.models import EMBED_MODEL, EMBED_REVISION
 from setauket.session_import import ImportedSession, ImportedTurn
 
@@ -294,7 +294,7 @@ class Store:
                      prompt_id: str | None, role: str, content: str,
                      transcript_path: str | None = None) -> bool:
         """Record a visible harness event using the same turn indexes and retention as MCP."""
-        if harness not in {"claude", "omp"}:
+        if harness not in CAPTURE_HARNESSES:
             raise ValueError("Unsupported capture harness")
         if role not in {"user", "assistant"} or not content.strip() or len(content) > 250_000:
             raise ValueError("Capture requires visible user/assistant text of at most 250,000 characters")
@@ -304,8 +304,7 @@ class Store:
             raise ValueError("Prompt ID is too long")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            harness_id = identity.register_harness(db, f"setauket:{harness}:hook",
-                                                   "Claude Code" if harness == "claude" else "Oh My Pi")
+            harness_id = identity.register_harness(db, f"setauket:{harness}:hook", CAPTURE_HARNESS_NAMES[harness])
             agent_id = identity.register_agent(db, harness_id, f"{harness}-session:{external_session_id}")
             source_key = f"{harness}-hook:{project_key}:{external_session_id}"
             digest = hashlib.sha256(content.encode()).hexdigest()

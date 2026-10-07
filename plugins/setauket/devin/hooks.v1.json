@@ -1,0 +1,26 @@
+{
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "setauket capture-devin --hook",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "setauket capture-devin --hook",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

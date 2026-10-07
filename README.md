@@ -115,13 +115,29 @@ clpr marketplace add kplawver/setauket
 clpr activate setauket@setauket
 ```
 
-That symlinks the `setauket-memory` skill and the MCP server into `~/.agents/` and composes the plugin's `agents.md` fragment into `~/.agents/agents.md`, so every harness bridged by `clpr` gets the memory guidance. The OMP skill under `integrations/omp/skills/` points at the same file, so all three stay in step.
+That symlinks the `setauket-memory` skill and the MCP server into `~/.agents/` and composes the plugin's `agents.md` fragment into `~/.agents/agents.md`, so every harness bridged by `clpr` gets the memory guidance. The integration skills under `integrations/omp/skills/` and `integrations/cline/skills/` point at the same file, so every copy stays in step.
 
 The repository is in the canonical layout — `AGENTS.md` at the root, skills bridged through `.agents/skills/`, and `CLAUDE.md` plus `.claude/skills` as committable relative symlinks — so a teammate who clones it inherits the standards with nothing to install. `clpr repo check` audits this and runs in CI.
 
 As long as your coding harness supports marketplaces and skills with hooks, Setauket should work fine.  If not, open an issue and let me know what's wrong and let's figure it out!
 
-### Claude Code plugin: opt-in live capture
+## Harness support: opt-in live capture
+
+Capture is driven by hooks or extensions that shell out to `setauket capture-<harness> --hook`; the MCP server stays the recall path everywhere. Every harness below is opted in per project with its own allowlist file, and installing the hook or extension alone never enables capture.
+
+| Harness | What ships | Turn events | Notes |
+|---|---|---|---|
+| Claude Code | Plugin (`hooks/hooks.json`) | `UserPromptSubmit`, `Stop` | Install via the marketplace below; restart Claude Code after installing. |
+| Codex | Same bundle, `.codex-plugin/plugin.json` | `UserPromptSubmit`, `Stop` | Payload shape matches Claude Code. Codex requires reviewing and trusting each hook once via `/hooks`. |
+| Devin CLI | `devin/hooks.v1.json` to copy into `.devin/` | `UserPromptSubmit`, `Stop` | Devin also reads `.claude/settings.json` hooks, but those run Claude Code's commands; use the shipped file so the right `capture-devin` command runs. Devin's `Stop` event exposes no reply text yet, so only prompts are captured today. |
+| GitHub Copilot CLI | `copilot/hooks.json` to copy into `~/.copilot/hooks/` or the repo's `.github/hooks/` | `userPromptSubmitted`, `agentStop` | Event matching tolerates PascalCase and camelCase spellings; reply field names are not yet documented upstream, so replies are captured only when a known field carries text. |
+| OpenCode | `integrations/opencode/setauket.ts` plugin | `session.idle` (via SDK) | Copy or symlink the file into `.opencode/plugins/`. Captures the newest visible user and assistant text per session after each turn; idempotent across repeated idle events. |
+| Cline | `integrations/cline/` plugin package | `beforeRun`, `afterRun` | Install with `cline plugin install /path/to/integrations/cline`. SDK/CLI/Kanban only — Cline's VS Code and JetBrains extensions do not support plugins yet. Reply text is read from the run result and depends on SDK field availability. |
+| Oh My Pi | `integrations/omp/` extension | `input`, `agent_end` | See the OMP section below. |
+
+Skipped for now: Antigravity (its hook payloads carry no message text, so capture would require reading the transcript — deferred), Cline IDE extensions (no plugin support), Devin Cloud (remote, no local hooks).
+
+### Claude Code and Codex plugin: opt-in live capture
 
 Install Setauket with Homebrew and start its service first. Then install the Setauket plugin, which bundles the MCP connection, the `setauket-memory` skill, and hooks for `UserPromptSubmit` and `Stop`:
 
@@ -138,7 +154,9 @@ Restart Claude Code after installation. If the project also has a Setauket `.mcp
 setauket capture-claude --disable --project /absolute/path/to/project
 ```
 
-Disabling stops **new** capture; it does not delete turns already stored, archived summaries, or backups. Visible prompts and final replies can contain secrets, including pasted text. The plugin does not scan or redact them; only enable projects you're comfortable storing locally. Existing manually imported Claude sessions must not be captured again (and vice versa); Setauket refuses this combination for the same session. This plugin does not automate message-bus presence, heartbeats, or polling — that is [Clothesline's](https://github.com/kplawver/clothesline) job. For development, load `plugins/claude-code` with `claude --plugin-dir /path/to/setauket/plugins/claude-code`. The bundled MCP URL assumes the default loopback port 19005.
+Disabling stops **new** capture; it does not delete turns already stored, archived summaries, or backups. Visible prompts and final replies can contain secrets, including pasted text. The plugin does not scan or redact them; only enable projects you're comfortable storing locally. Existing manually imported Claude sessions must not be captured again (and vice versa); Setauket refuses this combination for the same session. This plugin does not automate message-bus presence, heartbeats, or polling — that is [Clothesline's](https://github.com/kplawver/clothesline) job. For development, load `plugins/setauket` with `claude --plugin-dir /path/to/setauket/plugins/setauket`. The bundled MCP URL assumes the default loopback port 19005.
+
+For Codex, install the same directory as a Codex plugin (it carries `.codex-plugin/plugin.json`); Codex finds `codex/hooks.json` through the manifest and runs `setauket capture-codex --hook`. Codex shows every new hook in `/hooks` and skips unreviewed hooks, so trust the two entries there once. Then `setauket capture-codex --enable --project /absolute/path/to/project`.
 
 ## OMP extension: opt-in live capture
 
@@ -154,6 +172,25 @@ omp plugin install /path/to/setauket/integrations/omp
 The allowlist at `<data_dir>/omp-capture.json` is separate from Claude Code's. Installing or loading the extension alone **does not enable capture**. It records visible interactive/RPC user input and the final assistant response, dropping structured thinking, tool calls, tool output, and images. OMP print mode does not emit an input event; the extension uses the finalized user text from the completed turn instead. Ephemeral `--no-session` runs are not captured. Do not manually import an already captured OMP session; Setauket refuses duplicates. Disable new capture with `setauket capture-omp --disable --project /absolute/path/to/project`.
 
 On the installed OMP 18.4.4, `omp plugin install` links the local package into the user-level plugin store even when `--scope project` is passed. Its uninstall command requires `bun` on `PATH`; use `--extension` for a one-session trial if you do not want a user-wide plugin link. The extension requires the `setauket` CLI on `PATH` and never writes without per-project consent.
+
+## OpenCode plugin: opt-in live capture
+
+Copy or symlink `integrations/opencode/setauket.ts` into `.opencode/plugins/` (project) or `~/.config/opencode/plugins/` (global), then:
+
+```sh
+setauket capture-opencode --enable --project /absolute/path/to/project
+```
+
+The plugin subscribes to `session.idle` and asks the OpenCode SDK for the session's messages, so it captures the newest visible user text and final assistant reply per completed turn. Tool parts, thinking blocks, and images are dropped. Message IDs make repeat idle events idempotent. Because capture happens at turn end, a prompt is only recorded once the turn finishes; aborted turns are not captured. The allowlist at `<data_dir>/opencode-capture.json` is separate from every other harness's.
+
+## Cline plugin: opt-in live capture
+
+```sh
+cline plugin install /path/to/setauket/integrations/cline
+setauket capture-cline --enable --project /absolute/path/to/project
+```
+
+The plugin registers observational `beforeRun` and `afterRun` hooks and shells out to `setauket capture-cline --hook` with the visible prompt and reply. It only loads in the Cline SDK, CLI, and Kanban runtimes; the VS Code and JetBrains extensions have no plugin support yet. Sessions are keyed by the SDK session ID when the host provides one, otherwise runs under one project-wide session. The bundled `setauket-memory` skill is the same file the Claude Code plugin ships. Disable with `setauket capture-cline --disable --project /absolute/path/to/project`.
 
 ## Migrating from the 0.6.x combined service
 

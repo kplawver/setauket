@@ -1,0 +1,17 @@
+{
+  "name": "setauket-cline",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Opt-in Setauket turn capture for Cline",
+  "cline": {
+    "plugins": [{ "paths": ["./setauket.ts"], "capabilities": ["hooks"] }]
+  },
+  "peerDependencies": {
+    "@cline/sdk": "*"
+  },
+  "peerDependenciesMeta": {
+    "@cline/sdk": {
+      "optional": true
+    }
+  }
+}
