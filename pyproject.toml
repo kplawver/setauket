@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "setauket"
-version = "0.8.0"
+version = "0.8.2"
 description = "Local cross-harness context storage for coding agents"
 license = "MIT"
 # Capped below 3.14: from 3.14 on, fastembed demands onnxruntime>=1.24.2, which has no

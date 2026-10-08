@@ -47,7 +47,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
     store = store or Store(config.database)
     models = models or LocalModels(config.model_dir)
     worker = Worker(store, models)
-    server = MCPServer("setauket", version="0.8.0", instructions=(
+    server = MCPServer("setauket", version="0.8.2", instructions=(
         "Shared, local memory. Register a persistent harness installation key and an agent first. "
         "Submit visible session turns explicitly; connecting alone does not capture transcripts. "
         "Search before assuming a previous decision is current."))

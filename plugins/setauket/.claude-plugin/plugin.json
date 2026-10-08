@@ -1,6 +1,6 @@
 {
   "name": "setauket",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "description": "Local cross-harness memory tools and opt-in turn capture for Claude Code and Codex",
   "author": {
     "name": "Kevin Lawver"
