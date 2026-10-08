@@ -1,6 +1,6 @@
 {
   "name": "setauket-cline",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "private": true,
   "description": "Opt-in Setauket turn capture for Cline",
   "cline": {

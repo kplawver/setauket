@@ -1,10 +1,10 @@
 {
   "name": "setauket-omp",
-  "version": "0.7.1",
+  "version": "0.8.2",
   "private": true,
   "description": "Opt-in Setauket turn capture for Oh My Pi",
   "pi": {
     "extensions": ["./extensions/setauket.ts"],
-    "skills": ["./skills/setauket-memory"]
+    "skills": ["./skills/setauket-memory", "./skills/setauket-sessions"]
   }
 }

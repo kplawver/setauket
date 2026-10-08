@@ -6,11 +6,11 @@ Local, cross-harness memory for coding agents. A single ASGI process serves a St
 
 **Setauket is a context store only.** Durable messaging between agents is a separate project, [Clothesline](https://github.com/kplawver/clothesline), on port 19004. You can install either service without the other.
 
-**Status: 0.8.0.** Connecting to MCP does not capture sessions. Claude Code and OMP offer optional per-project live capture; other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
+**Status: 0.8.2.** Connecting to MCP does not capture sessions. Claude Code, Codex, Devin CLI, GitHub Copilot CLI, OpenCode, Cline, and OMP offer optional per-project live capture (see the harness table below); other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
 
 ## Why "Setauket"?
 
-Naming things is hard. Starting with my other project, [Tallmadge](https://tallmadge.dev), I picked the Culper Ring, George Washington's spy ring, lead by Benjamin Talmadge.  Their headquarters was in Setauket, New York, hence the name!  The team worked in codes and ciphers, keeping meticulous records about British activity and plans, and I figured it was probably kept at their headquarters at least _sometimes_.
+Naming things is hard. Starting with my other project, [Tallmadge](https://tallmadge.dev), I picked the Culper Ring, George Washington's spy ring, led by Benjamin Tallmadge.  Their headquarters was in Setauket, New York, hence the name!  The team worked in codes and ciphers, keeping meticulous records about British activity and plans, and I figured it was probably kept at their headquarters at least _sometimes_.
 
 ## Install with Homebrew
 
@@ -25,7 +25,7 @@ Open http://127.0.0.1:19005/ for the browser and connect agents to http://127.0.
 
 ## Development
 
-Requires Python 3.12+ and Homebrew's `llama.cpp` for local session summaries (`brew install llama.cpp`). Native `llama-cpp-python` proved too slow to build reliably on the test machine, so summarization invokes the bottled `llama-cli` as a short-lived local subprocess; the HTTP and browser interfaces remain in one process.
+Requires Python 3.12 or 3.13 and Homebrew's `llama.cpp` for local session summaries (`brew install llama.cpp`). Native `llama-cpp-python` proved too slow to build reliably on the test machine, so summarization invokes the bottled `llama-cli` as a short-lived local subprocess; the HTTP and browser interfaces remain in one process.
 
 ```sh
 uv venv --python 3.12
@@ -115,7 +115,7 @@ clpr marketplace add kplawver/setauket
 clpr activate setauket@setauket
 ```
 
-That symlinks the `setauket-memory` skill and the MCP server into `~/.agents/` and composes the plugin's `agents.md` fragment into `~/.agents/agents.md`, so every harness bridged by `clpr` gets the memory guidance. The integration skills under `integrations/omp/skills/` and `integrations/cline/skills/` point at the same file, so every copy stays in step.
+That symlinks the `setauket-memory` and `setauket-sessions` skills and the MCP server into `~/.agents/` and composes the plugin's `agents.md` fragment into `~/.agents/agents.md`, so every harness bridged by `clpr` gets the memory guidance. The integration skills under `integrations/omp/skills/` and `integrations/cline/skills/` are symlinks to the same files, so every copy stays in step.
 
 The repository is in the canonical layout — `AGENTS.md` at the root, skills bridged through `.agents/skills/`, and `CLAUDE.md` plus `.claude/skills` as committable relative symlinks — so a teammate who clones it inherits the standards with nothing to install. `clpr repo check` audits this and runs in CI.
 
@@ -210,6 +210,10 @@ Both stores must be importable, so install both packages first: `uv pip install 
 The script copies session history here and conversations and messages to Clothesline, keeps harness, agent, and project IDs identical in both so an agent keeps its identity, and leaves already-embedded vectors intact so nothing needs re-embedding. It refuses to overwrite existing outputs, refuses a source that is not schema v5, and refuses to split if the legacy database was indexed with a different embedding model than Setauket pins. It then verifies row counts, `integrity_check`, and `foreign_key_check` on both sides and prints a reconciliation table.
 
 Setauket's schema is at version 2: v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open. There are no migrations from schema v5, because after the split no legacy schema remains.
+
+## Release notes for 0.8.2
+
+Fixes the `setauket-sessions` skill links under `.agents/skills/` and `integrations/omp/skills/`, which still pointed at the pre-rename `plugins/claude-code` directory, and adds that skill to the OMP package. README corrections only otherwise; no behavior change.
 
 ## Release notes for 0.8.0
 
