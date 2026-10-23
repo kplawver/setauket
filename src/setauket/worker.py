@@ -64,6 +64,8 @@ class Worker:
                 if session and session["archived_at"] is None:
                     if session["last_turn_at"] > time.time() - 72 * 3600:
                         pass  # Received a new turn since the job was queued.
+                    elif not session["turns"]:
+                        self.store.discard(session["id"], session["last_turn_at"])
                     else:
                         try:
                             turns = session["turns"]

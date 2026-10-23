@@ -37,6 +37,6 @@ The links run from `.agents/` and the integrations into the plugin, not the reve
 1. `uv run ruff check .`
 2. `uv run pytest -q`
 3. `claude plugin validate . --strict && claude plugin validate plugins/setauket --strict`
-4. Database schema changes: bump `user_version` and add a migration, since `Store.__init__` gates on it. The schema is at version 2; v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open.
+4. Database schema changes: bump `user_version` and add a migration, since `Store.__init__` gates on it. The schema is at version 3; v3 prunes sessions archived empty by older versions, v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open.
 5. Changing `pyproject.toml` dependencies means `uv lock`, and a lock change means the Homebrew tarball hash changes.
 6. Adding a capture harness means all of: `CAPTURE_HARNESSES`/`CAPTURE_HARNESS_NAMES` in `identity.py`, an event row in `_ROLES` in `capture.py`, a `capture-<harness>` command (generated from the registry), a hook file or extension under `plugins/setauket/` or `integrations/`, and tests. Hooks and extensions shell out to the CLI; they never write to the database directly.

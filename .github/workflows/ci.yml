@@ -43,8 +43,6 @@ jobs:
                                "sqlite-vec is required for search.")
           PY
       - run: uv sync --frozen --extra dev
-      - name: Install Clothesline so the v5 split regression test runs
-        run: uv pip install --python .venv/bin/python "clothesline @ git+https://github.com/kplawver/clothesline.git"
       - run: uv run ruff check .
       - run: uv run pytest -q
       - run: uv build

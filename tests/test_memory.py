@@ -109,6 +109,48 @@ def test_worker_retries_and_completes_archive(setup):
         assert db.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
 
 
+def test_worker_deletes_empty_sessions_instead_of_archiving(setup):
+    store, harness, agent = setup
+    session = store.start_session(harness, agent, "project")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET last_turn_at=last_turn_at-? WHERE id=?", (73 * 3600, session))
+    worker = Worker(store, FakeModels())
+    worker.sweep()
+    while worker.work_one():
+        pass
+    assert store.get_session(session) is None
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_discard_is_atomic_against_new_turns(setup):
+    store, harness, agent = setup
+    session = store.start_session(harness, agent)
+    stamp = store.get_session(session)["last_turn_at"]
+    store.add_turn(session, harness, agent, "one", "user", "Too late")
+    assert not store.discard(session, stamp)
+    assert len(store.get_session(session)["turns"]) == 1
+    assert not store.discard(session, store.get_session(session)["last_turn_at"])
+    assert store.get_session(session) is not None
+
+
+def test_version_two_database_prunes_empty_archives(tmp_path):
+    path = tmp_path / "memory.sqlite3"
+    store = Store(path)
+    harness = store.register_harness("persistent-key", "Oh My Pi")
+    agent = store.register_agent(harness, "main")
+    kept = store.start_session(harness, agent)
+    store.add_turn(kept, harness, agent, "one", "user", "Real work")
+    assert store.archive(kept, store.get_session(kept)["last_turn_at"], ["Real summary"], "fake")
+    emptied = store.start_session(harness, agent)
+    assert store.archive(emptied, store.get_session(emptied)["last_turn_at"], [], "fake")
+    with store.connect() as db:
+        db.execute("PRAGMA user_version=2")
+    reopened = Store(path)
+    assert reopened.get_session(kept)["summaries"][0]["content"] == "Real summary"
+    assert reopened.get_session(emptied) is None
+
+
 def test_worker_summarizes_each_25_turn_segment(setup):
     store, harness, agent = setup
     session = store.start_session(harness, agent)
@@ -188,6 +230,22 @@ def test_reasoning_is_discarded():
         clean_blocks([{"type": "image", "text": "unsupported"}])
 
 
+def test_session_page_renders_markdown_safely(setup, tmp_path):
+    store, harness, agent = setup
+    session = store.start_session(harness, agent, "project")
+    store.add_turn(session, harness, agent, "event", "assistant",
+                   "**Bold** heading\n=============\n\n- item with `code`\n- [link](https://example.com)\n\n```python\nprint('hi')\n```\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))")
+    app = create_app(Config(data_dir=tmp_path), store, FakeModels(), start_worker=False)
+    with TestClient(app, base_url="http://127.0.0.1:19005") as client:
+        page = client.get("/sessions/" + session).text
+    assert '<h1><strong>Bold</strong> heading</h1>' in page
+    assert "<li>item with <code>code</code></li>" in page
+    assert '<a href="https://example.com">link</a>' in page
+    assert '<code class="language-python">' in page and "print('hi')" in page
+    assert "<script>" not in page and "&lt;script&gt;" in page
+    assert 'href="javascript:' not in page
+
+
 def test_http_and_mcp_versions(setup, tmp_path):
     store, harness, agent = setup
     session = store.start_session(harness, agent, "project")
@@ -220,11 +278,11 @@ def test_http_and_mcp_versions(setup, tmp_path):
             {"MCP-Protocol-Version": "2026-07-28"})["result"]["content"][0]["text"] == json.dumps({"harness_id": harness}, indent=2)
 
 
-def test_schema_is_version_two_and_reopens_without_migration(tmp_path):
+def test_schema_is_version_three_and_reopens_without_migration(tmp_path):
     path = tmp_path / "setauket.sqlite3"
     store = Store(path)
     with store.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
     assert Store(path).get_session("unknown") is None
     with store.connect() as db:
         db.execute("PRAGMA user_version=99")
@@ -255,7 +313,7 @@ def test_version_one_database_migrates_summaries_to_segments(tmp_path):
         raw.close()
     migrated = Store(path)
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     summaries = migrated.get_session(session)["summaries"]
     assert [(s["segment"], s["content"]) for s in summaries] == [(0, "Faithful summary")]
