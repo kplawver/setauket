@@ -7,6 +7,8 @@ from pathlib import Path
 
 import anyio
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -21,6 +23,9 @@ from setauket.worker import Worker
 log = logging.getLogger(__name__)
 TEMPLATES = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"), autoescape=select_autoescape())
 TEMPLATES.filters["date"] = lambda timestamp: datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m-%d %H:%M UTC") if timestamp else "—"
+# Raw HTML in stored text is escaped, not rendered; only markdown formatting becomes HTML.
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": False}).enable("table").enable("strikethrough")
+TEMPLATES.filters["markdown"] = lambda text: Markup(_MD.render(text or ""))
 
 
 def clean_blocks(blocks: list[dict]) -> str:
@@ -47,7 +52,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
     store = store or Store(config.database)
     models = models or LocalModels(config.model_dir)
     worker = Worker(store, models)
-    server = MCPServer("setauket", version="0.8.2", instructions=(
+    server = MCPServer("setauket", version="0.8.3", instructions=(
         "Shared, local memory. Register a persistent harness installation key and an agent first. "
         "Submit visible session turns explicitly; connecting alone does not capture transcripts. "
         "Search before assuming a previous decision is current."))

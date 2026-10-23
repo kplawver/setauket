@@ -90,7 +90,7 @@ class Store:
             self.path.chmod(0o600)
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise ValueError("Unsupported database version; upgrade Setauket before opening it")
             if version == 1:
                 self._rebuild_segmented_summaries(db)
@@ -108,7 +108,9 @@ class Store:
             revision = db.execute("SELECT value FROM metadata WHERE key='embedding_revision'").fetchone()[0]
             if revision != EMBED_REVISION:
                 raise ValueError("Embedding revision changed; indexes must be rebuilt before continuing")
-            db.execute("PRAGMA user_version=2")
+            if version <= 2:
+                self._prune_empty_archived_sessions(db)
+            db.execute("PRAGMA user_version=3")
         self.path.chmod(0o600)
 
     @staticmethod
@@ -124,6 +126,15 @@ class Store:
         db.execute("INSERT INTO summaries (id,session_id,segment,content,model,created_at) "
                    "SELECT id,session_id,0,content,model,created_at FROM summaries_v1")
         db.execute("DROP TABLE summaries_v1")
+
+    @staticmethod
+    def _prune_empty_archived_sessions(db):
+        """Schema v3: compaction now deletes turn-less sessions; drop ones older versions archived empty."""
+        db.execute("DELETE FROM sessions WHERE archived_at IS NOT NULL "
+                   "AND NOT EXISTS (SELECT 1 FROM summaries WHERE summaries.session_id=sessions.id) "
+                   "AND NOT EXISTS (SELECT 1 FROM turns WHERE turns.session_id=sessions.id) "
+                   "AND NOT EXISTS (SELECT 1 FROM capture_sources WHERE capture_sources.session_id=sessions.id) "
+                   "AND NOT EXISTS (SELECT 1 FROM import_sources WHERE import_sources.session_id=sessions.id)")
 
     @contextmanager
     def connect(self):
@@ -280,6 +291,22 @@ class Store:
                 self._delete_chunks(db, "hot", row[0])
             db.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
             db.execute("UPDATE sessions SET summary_id=?, archived_at=? WHERE id=?", (first_summary_id, now, session_id))
+            return True
+
+    def discard(self, session_id: str, last_turn_at: float) -> bool:
+        """Delete a session that never recorded a turn; atomic against new turns."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            session = db.execute("SELECT last_turn_at, archived_at FROM sessions WHERE id=?", (session_id,)).fetchone()
+            if not session or session["archived_at"] is not None or session["last_turn_at"] != last_turn_at:
+                return False
+            if db.execute("SELECT 1 FROM turns WHERE session_id=? LIMIT 1", (session_id,)).fetchone():
+                return False
+            # Capture or import sources still pointing at the session fall back to normal archival.
+            if (db.execute("SELECT 1 FROM capture_sources WHERE session_id=? LIMIT 1", (session_id,)).fetchone()
+                    or db.execute("SELECT 1 FROM import_sources WHERE session_id=? LIMIT 1", (session_id,)).fetchone()):
+                return False
+            db.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             return True
 
     def was_captured_session(self, harness: str, project_key: str, external_session_id: str) -> bool:

@@ -6,7 +6,7 @@ Local, cross-harness memory for coding agents. A single ASGI process serves a St
 
 **Setauket is a context store only.** Durable messaging between agents is a separate project, [Clothesline](https://github.com/kplawver/clothesline), on port 19004. You can install either service without the other.
 
-**Status: 0.8.2.** Connecting to MCP does not capture sessions. Claude Code, Codex, Devin CLI, GitHub Copilot CLI, OpenCode, Cline, and OMP offer optional per-project live capture (see the harness table below); other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
+**Status: 0.8.3.** Connecting to MCP does not capture sessions. Claude Code, Codex, Devin CLI, GitHub Copilot CLI, OpenCode, Cline, and OMP offer optional per-project live capture (see the harness table below); other clients must explicitly submit turns or opt in to an existing-session importer. Never submit secrets or private reasoning as text blocks.
 
 ## Why "Setauket"?
 
@@ -76,7 +76,7 @@ Neither MCP transport sessions nor model-facing harness names act as authenticat
 
 ## Retention and search
 
-After 72 hours without new turns, a daily sweep schedules an archive job. The session is compacted in 25-turn segments: one summary per segment is indexed before raw turns and their search indexes are deleted in one database transaction. Bounded segments keep each summarizer call small so long sessions cannot degenerate into echoing or truncating output. Failed summary jobs keep the originals and show errors in the dashboard. Generated summaries are lossy and should not be promoted automatically into preferences. Original turn content and associated source event IDs are no longer available after archival; project, session dates, and attribution remain.
+After 72 hours without new turns, a daily sweep schedules an archive job. The session is compacted in 25-turn segments: one summary per segment is indexed before raw turns and their search indexes are deleted in one database transaction. Bounded segments keep each summarizer call small so long sessions cannot degenerate into echoing or truncating output. Sessions that never recorded a turn are deleted outright instead of archived. Failed summary jobs keep the originals and show errors in the dashboard. Generated summaries are lossy and should not be promoted automatically into preferences. Original turn content and associated source event IDs are no longer available after archival; project, session dates, and attribution remain.
 
 FTS5 handles literal keyword queries; sqlite-vec adds local semantic search when embeddings are installed and processed. The web UI uses keyword search. All content remains on this machine except model downloads from Hugging Face.
 
@@ -209,7 +209,11 @@ Both stores must be importable, so install both packages first: `uv pip install 
 
 The script copies session history here and conversations and messages to Clothesline, keeps harness, agent, and project IDs identical in both so an agent keeps its identity, and leaves already-embedded vectors intact so nothing needs re-embedding. It refuses to overwrite existing outputs, refuses a source that is not schema v5, and refuses to split if the legacy database was indexed with a different embedding model than Setauket pins. It then verifies row counts, `integrity_check`, and `foreign_key_check` on both sides and prints a reconciliation table.
 
-Setauket's schema is at version 2: v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open. There are no migrations from schema v5, because after the split no legacy schema remains.
+Setauket's schema is at version 3: v3 prunes sessions archived empty by older versions, v2 replaced the one-summary-per-session table with ordered per-segment summaries, and v1 databases migrate in place on first open. There are no migrations from schema v5, because after the split no legacy schema remains.
+
+## Release notes for 0.8.3
+
+Compaction now deletes sessions that never recorded a turn instead of archiving them empty, and a schema-v3 migration prunes sessions older versions already archived that way. The session browser renders turn and summary content as markdown (CommonMark plus tables and strikethrough); raw HTML in stored text is escaped, not rendered, and `javascript:` links are dropped. Adds the `markdown-it-py` dependency.
 
 ## Release notes for 0.8.2
 

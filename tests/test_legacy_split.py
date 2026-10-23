@@ -178,7 +178,7 @@ def test_split_preserves_every_row_on_both_sides(legacy, tmp_path):
     assert [(s["segment"], s["content"]) for s in archived["summaries"]] == [(0, "Legacy whole-session summary")]
     with memory.connect() as db:
         assert db.execute("SELECT embedded FROM chunks WHERE id=7").fetchone()[0] == 1
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
 
     bus = ClotheslineStore(clothesline_out)
     with bus.connect() as db:
