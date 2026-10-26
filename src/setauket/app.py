@@ -47,12 +47,26 @@ def clean_blocks(blocks: list[dict]) -> str:
     return content
 
 
+def parse_when(value: str, *, end_of_day: bool = False) -> float:
+    """ISO date or datetime as a UTC timestamp; a bare date spans start or end of its day."""
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise ValueError("Dates must be ISO formatted, e.g. 2026-10-01 or 2026-10-01T14:30") from None
+    if len(text) == 10 and end_of_day:
+        parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
 def create_app(config: Config, store: Store | None = None, models: LocalModels | None = None,
                start_worker: bool = True):
     store = store or Store(config.database)
     models = models or LocalModels(config.model_dir)
     worker = Worker(store, models)
-    server = MCPServer("setauket", version="0.8.3", instructions=(
+    server = MCPServer("setauket", version="0.8.4", instructions=(
         "Shared, local memory. Register a persistent harness installation key and an agent first. "
         "Submit visible session turns explicitly; connecting alone does not capture transcripts. "
         "Search before assuming a previous decision is current."))
@@ -80,9 +94,16 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
         await anyio.to_thread.run_sync(store.end_session, session_id, harness_id)
         return {"ended": True}
 
-    @server.tool(description="Find past turns, archived summaries, and current decisions/preferences with lexical plus semantic search. Filter by project_key or category (hot/cold/memory). Use session_id from hot/cold results with get_session, or source_id from memory results with get_memory_history. Keyword search still works when models are unavailable.")
-    async def search_sessions(query: str, project_key: str | None = None, category: str | None = None,
-                              limit: int = 10) -> dict:
+    @server.tool(description="Find past turns, archived summaries, and current decisions/preferences with lexical plus semantic search. Filter by project_key, category (hot/cold/memory), or an after/before date range of ISO dates or datetimes in UTC (a bare date spans its whole day). Omit query to list sessions active in the date range instead; hot and cold matches are dated by their session's own span. Use session_id from hot/cold results with get_session, or source_id from memory results with get_memory_history. Keyword search still works when models are unavailable.")
+    async def search_sessions(query: str | None = None, project_key: str | None = None, category: str | None = None,
+                              after: str | None = None, before: str | None = None, limit: int = 10) -> dict:
+        start = parse_when(after) if after else None
+        end = parse_when(before, end_of_day=True) if before else None
+        if start is not None and end is not None and start > end:
+            raise ValueError("The start of a date range cannot follow its end")
+        if not query:
+            sessions = await anyio.to_thread.run_sync(store.list_sessions, project_key, start, end, limit)
+            return {"sessions": sessions}
         if not query.strip() or len(query) > 2000:
             raise ValueError("Search query must contain 1–2000 characters")
         try:
@@ -90,7 +111,8 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
         except Exception as error:  # noqa: BLE001 - keyword recall must survive any model failure.
             log.warning("Semantic search unavailable: %s", type(error).__name__)
             vector = None
-        results = await anyio.to_thread.run_sync(store.search_rows, query, project_key, category, limit, vector)
+        results = await anyio.to_thread.run_sync(store.search_rows, query, project_key, category, limit, vector,
+                                                 start, end)
         return {"results": results, "semantic_available": vector is not None}
 
     @server.tool(description="Retrieve a session by session_id. Hot sessions have turns; archived sessions contain lossy generated summaries, one per 25-turn segment in order, not the original transcript. Session metadata and dates remain available.")
@@ -139,22 +161,36 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
             page = max(0, min(10000, int(request.query_params.get("page", "0"))))
         except ValueError:
             page = 0
-        with store.connect() as db:
-            sessions = [dict(row) for row in db.execute(
-                "SELECT s.*,p.project_key FROM sessions s LEFT JOIN projects p ON p.id=s.project_id "
-                "ORDER BY s.started_at DESC LIMIT 31 OFFSET ?", (page * 30,))]
-        return render("sessions.html", sessions=sessions[:30], page=page, has_next=len(sessions) > 30)
+        from_date, to_date = request.query_params.get("from", "")[:10], request.query_params.get("to", "")[:10]
+        try:
+            after = parse_when(from_date) if from_date else None
+            before = parse_when(to_date, end_of_day=True) if to_date else None
+        except ValueError:  # invalid input filters nothing, matching how bad page numbers are treated
+            from_date = to_date = ""
+            after = before = None
+        sessions = await anyio.to_thread.run_sync(store.list_sessions, None, after, before, 31, page * 30)
+        filters = (("&from=" + from_date) if from_date else "") + (("&to=" + to_date) if to_date else "")
+        return render("sessions.html", sessions=sessions[:30], page=page, has_next=len(sessions) > 30,
+                      from_date=from_date, to_date=to_date, filters=filters)
 
     @server.custom_route("/search", methods=["GET"])
     async def search_page(request: Request):
         query = request.query_params.get("q", "")[:2000]
         project = request.query_params.get("project", "")[:500] or None
         category = request.query_params.get("category", "") or None
+        from_date, to_date = request.query_params.get("from", "")[:10], request.query_params.get("to", "")[:10]
         results = []
+        try:
+            after = parse_when(from_date) if from_date else None
+            before = parse_when(to_date, end_of_day=True) if to_date else None
+        except ValueError:
+            from_date = to_date = ""
+            after = before = None
         if query.strip():
             # Web search remains usable while models are offline.
-            results = await anyio.to_thread.run_sync(store.search_rows, query, project, category, 30)
-        return render("search.html", query=query, project=project or "", category=category or "", results=results)
+            results = await anyio.to_thread.run_sync(store.search_rows, query, project, category, 30, None, after, before)
+        return render("search.html", query=query, project=project or "", category=category or "",
+                      from_date=from_date, to_date=to_date, results=results)
 
     @server.custom_route("/sessions/{session_id}", methods=["GET"])
     async def session_page(request: Request):
