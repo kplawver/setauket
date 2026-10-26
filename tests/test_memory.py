@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from starlette.testclient import TestClient
 
-from setauket.app import clean_blocks, create_app
+from setauket.app import clean_blocks, create_app, parse_when
 from setauket.config import Config
 from setauket.models import LocalModels
 from setauket.storage import Store
@@ -276,6 +276,94 @@ def test_http_and_mcp_versions(setup, tmp_path):
             "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
                       "io.modelcontextprotocol/clientCapabilities": {}}}},
             {"MCP-Protocol-Version": "2026-07-28"})["result"]["content"][0]["text"] == json.dumps({"harness_id": harness}, indent=2)
+
+
+def test_parse_when_reads_iso_dates_and_datetimes():
+    assert parse_when("2001-09-09") == 999993600.0  # midnight UTC
+    assert 999993600 + 86399 <= parse_when("2001-09-09", end_of_day=True) <= 999993600 + 86400
+    assert parse_when("2001-09-09T01:46:40Z") == 1000000000.0
+    assert parse_when("2001-09-09T01:46:40") == 1000000000.0  # naive times read as UTC
+    with pytest.raises(ValueError):
+        parse_when("not-a-date")
+
+
+def test_list_sessions_by_date_range(setup):
+    store, harness, agent = setup
+    september = store.start_session(harness, agent, "project")
+    november = store.start_session(harness, agent, "other")
+    with store.connect() as db:  # a session spans started_at to last_turn_at
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1789000000, 1789003600, september))
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1796000000, 1796003600, november))
+    assert [s["id"] for s in store.list_sessions(after=1789000000, before=1789000060)] == [september]
+    assert [s["id"] for s in store.list_sessions(after=1789000000, before=1796000000 + 86400)] == [november, september]
+    assert [s["id"] for s in store.list_sessions(after=1789003500, before=1789003501)] == [september]  # overlap counts
+    assert store.list_sessions(after=1, before=2) == []
+    assert [s["id"] for s in store.list_sessions(project_key="other", after=1789000000)] == [november]
+
+
+def test_search_date_range_judges_sessions_not_write_time(setup):
+    store, harness, agent = setup
+    early = store.start_session(harness, agent)
+    late = store.start_session(harness, agent)
+    store.add_turn(early, harness, agent, "one", "user", "orbit deployment notes")
+    store.add_turn(late, harness, agent, "one", "user", "orbit deployment notes")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1000000000, 1000000100, early))
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1400000000, 1400000100, late))
+    # Archiving rewrites the chunk set at write time (today) for a session that ran in 2001.
+    assert store.archive(early, 1000000100, ["Orbit summary"], "fake")
+    assert {h["session_id"] for h in store.search_rows("orbit")} == {early, late}
+    assert [h["session_id"] for h in store.search_rows("orbit", after=900000000, before=1100000000)] == [early]
+    assert [h["session_id"] for h in store.search_rows("orbit", after=1300000000, before=1500000000)] == [late]
+
+
+def test_date_filters_in_ui(setup, tmp_path):
+    store, harness, agent = setup
+    old = store.start_session(harness, agent, "project")
+    store.add_turn(old, harness, agent, "one", "user", "legacy migration work")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1000000000, 1000000100, old))
+    app = create_app(Config(data_dir=tmp_path), store, FakeModels(), start_worker=False)
+    with TestClient(app, base_url="http://127.0.0.1:19005") as client:
+        assert old in client.get("/sessions?from=2001-09-09&to=2001-09-10").text
+        assert old not in client.get("/sessions?from=2026-01-01&to=2026-01-02").text
+        assert old in client.get("/sessions?from=garbage").text  # invalid input filters nothing
+        assert "legacy migration work" in client.get("/search?q=migration&from=2001-09-09").text
+        assert "No matches." in client.get("/search?q=migration&from=2026-01-01").text
+        assert 'name="from" value="2001-09-09"' in client.get("/sessions?from=2001-09-09").text  # form keeps state
+
+
+def test_mcp_search_sessions_accepts_date_range(setup, tmp_path):
+    store, harness, agent = setup
+    old = store.start_session(harness, agent, "project")
+    store.add_turn(old, harness, agent, "one", "user", "legacy migration work")
+    with store.connect() as db:
+        db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1000000000, 1000000100, old))
+    app = create_app(Config(data_dir=tmp_path), store, FakeModels(), start_worker=False)
+    with TestClient(app, base_url="http://127.0.0.1:19005") as client:
+        headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
+        def rpc(body):
+            extra = {"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": body["method"]}
+            if body["method"] == "tools/call":
+                extra["Mcp-Name"] = body["params"]["name"]
+            result = client.post("/mcp", headers=headers | extra, json=body)
+            assert result.status_code == 200, result.text
+            return result.json()
+
+        def call(arguments):
+            body = rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                "name": "search_sessions", "arguments": arguments, "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {}}}})
+            return json.loads(body["result"]["content"][0]["text"])
+
+        dated = call({"after": "2001-09-09", "before": "2001-09-10"})  # no query, dates only
+        assert [s["id"] for s in dated["sessions"]] == [old]
+        results = call({"query": "migration", "after": "2001-09-09"})["results"]
+        assert [r["session_id"] for r in results] == [old]
+        assert call({"query": "migration", "after": "2026-01-01"})["results"] == []
+        assert old in [s["id"] for s in call({})["sessions"]]  # dateless call lists recent sessions
 
 
 def test_schema_is_version_three_and_reopens_without_migration(tmp_path):

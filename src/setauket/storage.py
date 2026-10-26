@@ -272,6 +272,27 @@ class Store:
                 row = db.execute("SELECT * FROM memories WHERE id=?", (row["superseded_by"],)).fetchone() if row["superseded_by"] else None
             return history
 
+    def list_sessions(self, project_key: str | None = None, after: float | None = None,
+                      before: float | None = None, limit: int = 30, offset: int = 0) -> list[dict]:
+        """Sessions whose activity overlaps [after, before]; a session spans started_at to last_turn_at."""
+        if not 1 <= limit <= 100:
+            raise ValueError("Limit must be between 1 and 100")
+        filters, params = [], []
+        if project_key:
+            filters.append("p.project_key=?")
+            params.append(project_key)
+        if after is not None:
+            filters.append("s.last_turn_at>=?")
+            params.append(after)
+        if before is not None:
+            filters.append("s.started_at<=?")
+            params.append(before)
+        where = (" WHERE " + " AND ".join(filters)) if filters else ""
+        with self.connect() as db:
+            rows = db.execute("SELECT s.*,p.project_key FROM sessions s LEFT JOIN projects p ON p.id=s.project_id"
+                              + where + " ORDER BY s.started_at DESC LIMIT ? OFFSET ?", (*params, limit, offset))
+            return [dict(row) for row in rows]
+
     def archive(self, session_id: str, last_turn_at: float, summaries: list[str], model: str) -> bool:
         """Replace a session's raw turns with ordered per-segment summaries in one transaction."""
         with self.connect() as db:
@@ -472,7 +493,9 @@ class Store:
                            ((str(row["id"]), time.time()) for row in rows))
             return len(rows)
 
-    def search_rows(self, query: str, project_key: str | None = None, category: str | None = None, limit: int = 10, vector: list[float] | None = None) -> list[dict]:
+    def search_rows(self, query: str, project_key: str | None = None, category: str | None = None,
+                    limit: int = 10, vector: list[float] | None = None,
+                    after: float | None = None, before: float | None = None) -> list[dict]:
         if not 1 <= limit <= 50:
             raise ValueError("Limit must be between 1 and 50")
         if category not in {None, "hot", "cold", "memory"}:
@@ -485,6 +508,25 @@ class Store:
             if category:
                 filters.append("c.category=?")
                 params.append(category)
+            # Chunks are stamped at write time (summaries at archive time), so hot and cold
+            # chunks are dated by their session's own span; memories keep their own stamp.
+            session_window = (" LEFT JOIN turns t ON c.category='hot' AND t.id=c.source_id"
+                              " LEFT JOIN summaries y ON c.category='cold' AND y.id=c.source_id"
+                              " LEFT JOIN sessions s ON s.id=COALESCE(t.session_id,y.session_id)")
+            if after is not None:
+                filters.append("COALESCE(s.last_turn_at,c.created_at)>=?")
+                params.append(after)
+            if before is not None:
+                filters.append("COALESCE(s.started_at,c.created_at)<=?")
+                params.append(before)
+
+            def within_window(chunk_id: int) -> bool:
+                if after is None and before is None:
+                    return True
+                row = db.execute("SELECT COALESCE(s.last_turn_at,c.created_at),COALESCE(s.started_at,c.created_at)"
+                                 " FROM chunks c" + session_window + " WHERE c.id=?", (chunk_id,)).fetchone()
+                return row is not None and (after is None or row[0] >= after) and (before is None or row[1] <= before)
+
             where = (" AND " + " AND ".join(filters)) if filters else ""
             scores = {}
             # Match through FTS's tokenizer instead of interpolating arbitrary user syntax.
@@ -493,8 +535,9 @@ class Store:
             terms = [term for term in terms if term]
             if terms:
                 expression = " OR ".join('"' + term + '"' for term in terms)
-                sql = ("SELECT c.id FROM chunks_fts f JOIN chunks c ON c.id=CAST(f.chunk_id AS INTEGER) "
-                       "LEFT JOIN projects p ON p.id=c.project_id WHERE chunks_fts MATCH ?" + where +
+                sql = ("SELECT c.id FROM chunks_fts f JOIN chunks c ON c.id=CAST(f.chunk_id AS INTEGER)"
+                       " LEFT JOIN projects p ON p.id=c.project_id" + session_window +
+                       " WHERE chunks_fts MATCH ?" + where +
                        " ORDER BY bm25(chunks_fts) LIMIT 100")
                 for rank, row in enumerate(db.execute(sql, [expression, *params])):
                     scores[row[0]] = scores.get(row[0], 0) + 1 / (60 + rank + 1)
@@ -506,7 +549,8 @@ class Store:
                                             (sqlite_vec.serialize_float32(vector), 100)).fetchall()
                     for rank, (chunk_id, _) in enumerate(candidates):
                         row = db.execute("SELECT c.category,p.project_key FROM chunks c LEFT JOIN projects p ON c.project_id=p.id WHERE c.id=?", (chunk_id,)).fetchone()
-                        if row and (not project_key or row[1] == project_key) and (not category or row[0] == category):
+                        if row and (not project_key or row[1] == project_key) and (not category or row[0] == category) \
+                                and within_window(chunk_id):
                             scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (60 + rank + 1)
             results = []
             for chunk_id in sorted(scores, key=scores.get, reverse=True)[:limit]:
