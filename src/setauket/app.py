@@ -66,7 +66,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
     store = store or Store(config.database)
     models = models or LocalModels(config.model_dir)
     worker = Worker(store, models)
-    server = MCPServer("setauket", version="0.8.4", instructions=(
+    server = MCPServer("setauket", version="0.8.5", instructions=(
         "Shared, local memory. Register a persistent harness installation key and an agent first. "
         "Submit visible session turns explicitly; connecting alone does not capture transcripts. "
         "Search before assuming a previous decision is current."))
@@ -94,7 +94,7 @@ def create_app(config: Config, store: Store | None = None, models: LocalModels |
         await anyio.to_thread.run_sync(store.end_session, session_id, harness_id)
         return {"ended": True}
 
-    @server.tool(description="Find past turns, archived summaries, and current decisions/preferences with lexical plus semantic search. Filter by project_key, category (hot/cold/memory), or an after/before date range of ISO dates or datetimes in UTC (a bare date spans its whole day). Omit query to list sessions active in the date range instead; hot and cold matches are dated by their session's own span. Use session_id from hot/cold results with get_session, or source_id from memory results with get_memory_history. Keyword search still works when models are unavailable.")
+    @server.tool(description="Find past turns, archived summaries, and current decisions/preferences with lexical plus semantic search. Filter by project_key, category (hot/cold/memory), or an after/before date range of ISO dates or datetimes in UTC (a bare date spans its whole day). Omit query to list sessions active in the date range instead; hot and cold matches are dated by their session's own span. Use session_id from results with get_session, or source_id from memory results with get_memory_history. Keyword search still works when models are unavailable.")
     async def search_sessions(query: str | None = None, project_key: str | None = None, category: str | None = None,
                               after: str | None = None, before: str | None = None, limit: int = 10) -> dict:
         start = parse_when(after) if after else None

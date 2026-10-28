@@ -295,6 +295,7 @@ def test_list_sessions_by_date_range(setup):
         db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1789000000, 1789003600, september))
         db.execute("UPDATE sessions SET started_at=?,last_turn_at=? WHERE id=?", (1796000000, 1796003600, november))
     assert [s["id"] for s in store.list_sessions(after=1789000000, before=1789000060)] == [september]
+    assert all(s["session_id"] == s["id"] for s in store.list_sessions(after=1789000000))  # get_session handoff
     assert [s["id"] for s in store.list_sessions(after=1789000000, before=1796000000 + 86400)] == [november, september]
     assert [s["id"] for s in store.list_sessions(after=1789003500, before=1789003501)] == [september]  # overlap counts
     assert store.list_sessions(after=1, before=2) == []
@@ -360,6 +361,7 @@ def test_mcp_search_sessions_accepts_date_range(setup, tmp_path):
 
         dated = call({"after": "2001-09-09", "before": "2001-09-10"})  # no query, dates only
         assert [s["id"] for s in dated["sessions"]] == [old]
+        assert [s["session_id"] for s in dated["sessions"]] == [old]  # feeds get_session directly
         results = call({"query": "migration", "after": "2001-09-09"})["results"]
         assert [r["session_id"] for r in results] == [old]
         assert call({"query": "migration", "after": "2026-01-01"})["results"] == []
