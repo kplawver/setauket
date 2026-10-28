@@ -289,7 +289,9 @@ class Store:
             params.append(before)
         where = (" WHERE " + " AND ".join(filters)) if filters else ""
         with self.connect() as db:
-            rows = db.execute("SELECT s.*,p.project_key FROM sessions s LEFT JOIN projects p ON p.id=s.project_id"
+            # s.id is aliased so listing rows carry session_id like search_rows results do;
+            # agents hand it straight to get_session.
+            rows = db.execute("SELECT s.*,s.id AS session_id,p.project_key FROM sessions s LEFT JOIN projects p ON p.id=s.project_id"
                               + where + " ORDER BY s.started_at DESC LIMIT ? OFFSET ?", (*params, limit, offset))
             return [dict(row) for row in rows]
 
