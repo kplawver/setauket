@@ -223,6 +223,25 @@ def test_summary_subprocess_uses_private_prompt_file(tmp_path, monkeypatch):
     assert model._complete("Summarize", private_content) == "Faithful summary."
 
 
+def test_summary_normalizes_echo_hostile_content(tmp_path, monkeypatch):
+    # Stored tool output can contain carriage returns (git progress bars) and NUL bytes;
+    # llama-cli rewrites CR at some token boundaries and truncates the prompt at a NUL.
+    model = LocalModels(tmp_path)
+    hostile = "git output\rprogress\r\ndone\x00tail"
+    normalized = "git output\nprogress\ndonetail"
+
+    def fake_run(command, **kwargs):
+        assert "--no-escape" in command  # escape processing would rewrite backslash sequences first
+        prompt = Path(command[command.index("-f") + 1])
+        output = Path(command[command.index("-o") + 1])
+        assert prompt.read_text() == normalized
+        output.write_text(f"User:\n{normalized}\n\nAssistant:\nFaithful summary.\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("setauket.models.subprocess.run", fake_run)
+    assert model._complete("Summarize", hostile) == "Faithful summary."
+
+
 def test_reasoning_is_discarded():
     assert clean_blocks([{"type": "thinking", "text": "private"},
                          {"type": "text", "text": "visible"}]) == "visible"
