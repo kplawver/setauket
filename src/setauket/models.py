@@ -107,15 +107,23 @@ class LocalModels:
         return partial[0] if partial else "No content was submitted for this session."
 
     def _complete(self, instructions, content):
+        # llama-cli's echo of the prompt is not byte-faithful for every input: carriage
+        # returns are rewritten at some token boundaries and NUL bytes truncate the prompt
+        # entirely. Normalize both here so the echo of the prompt file matches the prefix
+        # check below; progress-bar CRs carry no meaning the model needs.
+        content = content.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
         # Private files avoid leaking conversation content through process arguments.
         with tempfile.TemporaryDirectory(prefix="setauket-summary-") as directory:
             prompt = Path(directory) / "prompt.txt"
             output = Path(directory) / "output.txt"
             prompt.write_text(content)
+            # --no-escape keeps the prompt file literal; with llama-cli's default escape
+            # processing, stored turns containing \" or \t are rewritten before inference
+            # and the echoed prompt no longer matches, so _complete rejects its own output.
             command = ["llama-cli", "-m", str(self.text_path), "-c", "8192",
                        "-ngl", "99" if sys.platform == "darwin" else "0", "-n", "800",
                        "--reasoning", "off", "--no-display-prompt", "--no-warmup",
-                       "--no-show-timings", "--simple-io", "-st", "-sys", instructions,
+                       "--no-show-timings", "--simple-io", "--no-escape", "-st", "-sys", instructions,
                        "-f", str(prompt), "-o", str(output)]
             result = subprocess.run(command, capture_output=True, timeout=300, check=False)
             if result.returncode != 0:
